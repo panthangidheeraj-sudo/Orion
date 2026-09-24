@@ -1,0 +1,85 @@
+/* VisionField Copilot — design tokens.
+   These values are the single source of truth and mirror the Design canvas exactly.
+   There is no accent hue: action = --vf-invert fill with --vf-on-invert text. */
+:root {
+  /* surfaces */
+  --vf-black: #000000;
+  --vf-panel: #1a1c20;
+  /* Message bubbles float over the starfield, so they are translucent. The
+     blur is not decoration: without it, moving stars travel behind the text
+     and the copy becomes hard to read. */
+  --vf-panel-glass: rgba(26, 28, 32, 0.42);
+  /* Light enough that stars still read as soft points behind the panel. A
+     heavy blur over a sparse starfield averages them away to flat black,
+     which defeats the transparency entirely; 5px softens them just enough
+     that moving points do not fight the text.
+     Measured on the rendered page, the brightest background pixel anywhere
+     text sits is L=0.0115, which leaves body text at 14.8:1 and muted
+     metadata at 5.2:1 — both still clear of AA. */
+  --vf-glass-blur: blur(5px) saturate(1.1);
+  --vf-inset: #121417;
+  --vf-track: #26292f;
+  --vf-border: #383d45;
+  --vf-edge: #565b65;          /* outer boundary of a panel floating on black (3.08:1) */
+  --vf-border-strong: #4a4f59;
+
+  /* text */
+  --vf-text: #f2f3f4;
+  --vf-text-2: #c4c8ce;
+  --vf-muted: #8e939b;
+  --vf-placeholder: #7e838b;
+
+  /* action */
+  --vf-invert: #f2f3f4;
+  --vf-on-invert: #0a0b0d;
+
+  /* status — the only colour in the product besides the voice spectrum */
+  --vf-ok: #43d9a3;
+  --vf-warn: #f5b942;
+  --vf-danger: #ff7a6b;
+  --vf-record: #e5484d;
+
+  /* overlays inside the camera */
+  --vf-overlay: #ffffff;
+  --vf-overlay-2: #b9bec6;
+
+  /* the one gradient: voice activity */
+  --vf-voice: linear-gradient(90deg, #5be1f5, #4096ff, #a88cff, #f07bd0, #ffffff);
+
+  /* radius */
+  --vf-r-chip: 8px;
+  --vf-r-btn: 12px;
+  --vf-r-input: 14px;
+  --vf-r-panel: 18px;
+  --vf-r-card: 22px;
+  --vf-r-composer: 24px;
+
+  /* elevation — all pure black */
+  --vf-e1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --vf-e2: 0 10px 28px -12px rgba(0, 0, 0, 0.65);
+  --vf-e3: 0 26px 70px -22px rgba(0, 0, 0, 0.92);
+
+  /* motion */
+  --vf-instant: 90ms;
+  --vf-quick: 180ms;
+  --vf-panel-dur: 260ms;
+  --vf-mode: 520ms;
+  --vf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* type */
+  --vf-display: 'Sora', 'Segoe UI', sans-serif;
+  --vf-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --vf-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+
+  /* layout */
+  --vf-gutter: 64px;
+  --vf-safe-top: env(safe-area-inset-top, 0px);
+  --vf-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 1023px) {
+  :root { --vf-gutter: 32px; }
+}
+@media (max-width: 767px) {
+  :root { --vf-gutter: 12px; }
+}

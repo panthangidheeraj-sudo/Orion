@@ -1,0 +1,57 @@
+# VisionField Copilot — backend dependencies
+#
+# Core service. These are all that is needed for the backend to start, ingest
+# documents, run the agent loop and serve the API.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+python-multipart>=0.0.9
+httpx>=0.27
+numpy>=1.26
+pillow>=10.3
+psutil>=5.9            # §23 CPU and memory figures; degrades honestly without it
+
+# Document "eyes" (§11). PyMuPDF does both text extraction and page rendering.
+pymupdf>=1.24
+pypdf>=4.2            # fallback text extraction if PyMuPDF is unavailable
+python-docx>=1.1      # DOCX support
+
+# Tests
+pytest>=8.2
+pytest-asyncio>=0.23
+
+# ---------------------------------------------------------------------------
+# Optional, installed per model once a Qualcomm AI Hub export exists.
+# Keep these OUT of the base install so the service starts on any machine and
+# reports honestly about what is missing (§25).
+# ---------------------------------------------------------------------------
+#
+# ONNX Runtime — the documented Windows target runtime (§5).
+#   Snapdragon (NPU via the QNN execution provider):
+#     pip install onnxruntime-qnn
+#   Everything else (CPU):
+#     pip install onnxruntime
+#
+# Main reasoning VLM (§3), Qwen3-VL-2B-Instruct and friends:
+#     pip install onnxruntime-genai            # CPU
+#     pip install onnxruntime-genai-directml   # or the QNN build on Snapdragon
+#
+# Embeddings tokenizer for Nomic-Embed-Text / MiniLM-v2 (§12):
+#     pip install tokenizers
+#
+# OCR (§3): EasyOCR is the quickest CPU path before a Workbench export exists.
+#     pip install easyocr
+#
+# Speech (§17):
+#     pip install faster-whisper     # CPU fallback for Whisper-Base
+#     piper                          # TTS binary, plus a voice in data/models/pipertts_en/
+#
+# Vector store (§13): optional; the service uses an exact numpy scan without it.
+#     pip install sqlite-vec
+#
+# Qualcomm AI Hub Workbench tooling (§5) — used to compile, profile and export,
+# not at runtime. On Snapdragon X Elite / X2 Elite Windows hosts check the
+# current repository README for the AMD64/x86-64 Python requirement first.
+#     pip install qai_hub_models
+#     qai-hub configure --api_token <token>     # token from the environment, never committed
