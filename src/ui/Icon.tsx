@@ -1,3 +1,5 @@
+import moonBrandmarkUrl from '../assets/brandmark-moon.png'
+
 const P: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
   mic: 'M9 3h6v11a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3',
@@ -81,6 +83,23 @@ export function Brandmark({ size = 32 }: { size?: number }) {
       <circle cx="16" cy="16" r="4.4" stroke="currentColor" strokeWidth="1.6" />
       <circle cx="16" cy="16" r="1.5" fill="currentColor" />
     </svg>
+  )
+}
+
+/** Orion's mark: a crescent moon, pitted with craters. This is the app's
+ * actual logo — used top-left in the nav and wherever the brand needs to
+ * read at a glance. It's a supplied image asset (fine linework a hand-coded
+ * SVG can't reproduce faithfully) rather than a redrawn approximation. */
+export function MoonMark({ size = 32 }: { size?: number }) {
+  return (
+    <img
+      src={moonBrandmarkUrl}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      style={{ flex: 'none', display: 'block', objectFit: 'contain' }}
+    />
   )
 }
 

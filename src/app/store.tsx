@@ -48,6 +48,18 @@ interface Store {
   ask: (text: string, mode: Mode, attachments?: string[]) => string
   stopAsking: () => void
 
+  /** True only for a message `addMessage` created this session and that
+   * hasn't been marked seen yet — never true for a message that was already
+   * sitting in a conversation before this session (seeded or persisted
+   * history). A non-mutating read, safe to call from a render/state
+   * initializer (including twice, under StrictMode). */
+  peekFreshMessage: (id: string) => boolean
+  /** Marks a message as seen, so it never reports fresh again — call once
+   * from an effect after a fresh message has started (or finished) revealing
+   * itself. Deleting an already-consumed id is a no-op, so this is safe to
+   * call more than once (again, StrictMode). */
+  consumeFreshMessage: (id: string) => void
+
   /** What the local backend reports about itself, or offline. */
   backend: api.BackendInfo
   refreshBackend: () => void
@@ -68,14 +80,15 @@ function kindOf(name: string, type: string): VFile['kind'] {
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [prefs, setPrefsState] = useState<Prefs>(() => {
-    // First run takes its cue from the operating system; after that the in-app
-    // switch is authoritative, so motion can be turned back ON here even when
-    // the OS asks for less of it elsewhere.
-    const stored = localStorage.getItem(K.prefs)
-    if (stored) return load(K.prefs, DEFAULT_PREFS)
-    let osReduce = false
-    try { osReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { /* no matchMedia */ }
-    return { ...DEFAULT_PREFS, reduceMotion: osReduce }
+    // Orion's animated starfield/motion is ON by default for every fresh
+    // session. We deliberately do NOT read the OS `prefers-reduced-motion`
+    // media query here: a system-level accessibility setting a user has for
+    // OTHER apps must not silently disable Orion's default motion before
+    // they've ever seen it. Reduce Motion is opt-in, via the in-app toggle
+    // in Settings, which persists to localStorage from that point on.
+    // load() already falls back to the defaults when storage is empty or
+    // blocked (private mode, disabled site data) instead of throwing.
+    return { ...load(K.prefs, DEFAULT_PREFS) }
   })
   const [route, setRoute] = useState<Route>(() => (load(K.prefs, DEFAULT_PREFS).onboarded ? 'home' : 'onboarding'))
   const [conversations, setConversations] = useState<Conversation[]>(() => loadList(K.convos, SEED_CONVERSATIONS))
@@ -100,6 +113,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [access, setAccessState] = useState<Access>(() => load(K.access, DEFAULT_ACCESS))
   const [toasts, setToasts] = useState<Toast[]>([])
   const [asking, setAsking] = useState<Asking | null>(null)
+  const freshMessageIds = useRef<Set<string>>(new Set())
+  const peekFreshMessage = useCallback((id: string) => freshMessageIds.current.has(id), [])
+  const consumeFreshMessage = useCallback((id: string) => {
+    freshMessageIds.current.delete(id)
+  }, [])
   const [backend, setBackend] = useState<api.BackendInfo>(() => api.lastKnownBackend())
   const backendRef = useRef(backend)
   backendRef.current = backend
@@ -135,6 +153,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [refreshBackend])
+
+  // Keep the status honest over time: a hosted backend can go to sleep or wake
+  // up while the page stays open. Re-check more often while it is offline.
+  useEffect(() => {
+    const every = backend.online ? 60_000 : 20_000
+    const h = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refreshBackend()
+    }, every)
+    return () => window.clearInterval(h)
+  }, [backend.online, refreshBackend])
 
   const go = useCallback<Store['go']>((r, opts) => {
     if (opts?.conversation) setActiveId(opts.conversation)
@@ -181,6 +209,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const addMessage = useCallback((conversationId: string, msg: Message) => {
+    if (msg.role === 'assistant') freshMessageIds.current.add(msg.id)
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id !== conversationId) return c
@@ -332,6 +361,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       mode,
       profession: snapshot.profile.profession || undefined,
       hasAttachments: attachments.length > 0,
+      // What the technician has already told us earlier in this thread, so the
+      // offline reasoner can carry a diagnosis across turns instead of asking
+      // for something it was already given.
+      priorUserTexts: (convo?.messages ?? [])
+        .filter((m) => m.role === 'user' && m.text)
+        .map((m) => m.text as string),
     }
 
     askTimers.current.forEach((t) => window.clearTimeout(t))
@@ -429,7 +464,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     conversations, activeId, active,
     openConversation, newConversation, renameConversation, deleteConversation, addMessage,
     files, addFiles, removeFile, attachToActive, openDocId,
-    asking, ask, stopAsking,
+    asking, ask, stopAsking, peekFreshMessage, consumeFreshMessage,
     backend, refreshBackend,
     profile, setProfile: setProfileState,
     access, setAccess: setAccessState,

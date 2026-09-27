@@ -38,7 +38,7 @@ export function Files() {
           <h2>Files &amp; documents</h2>
           <span className="sub">Manuals, schematics and captures available to the assistant</span>
         </div>
-        <span style={{ flex: 1 }} />
+        <span className="sheet-spacer" style={{ flex: 1 }} />
         <input
           ref={picker} type="file" multiple hidden
           accept="image/*,application/pdf,text/plain,.md,.csv"
@@ -46,7 +46,7 @@ export function Files() {
             if (e.target.files?.length) {
               const made = addFiles(e.target.files)
               if (active) attachToActive(made.map((f) => f.id))
-              toast(`${made.length} file${made.length > 1 ? 's' : ''} added`, 'Indexing runs on the NPU, on this device.')
+              toast(`${made.length} file${made.length > 1 ? 's' : ''} added`, 'Indexing has started — watch the status on each file.')
             }
             e.target.value = ''
           }}
@@ -74,13 +74,13 @@ export function Files() {
           <div className="empty" style={{ padding: '60px 20px' }}>
             <Icon name="folder" size={34} stroke="var(--vf-text-2)" width={1.4} />
             <h2 style={{ fontSize: 22 }}>No files here yet</h2>
-            <p>Add a manual, a datasheet or a schematic and VisionField will cite it by page number.</p>
+            <p>Add a manual, a datasheet or a schematic and Orion will cite it by page number.</p>
             <button type="button" className="btn primary" onClick={() => picker.current?.click()}>
               <Icon name="plus" size={17} stroke="var(--vf-on-invert)" />Add files
             </button>
           </div>
         ) : (
-          <div className="grid-files">
+          <div className="grid-files vf-stagger">
             {shown.map((f) => (
               <div key={f.id} className="filecard">
                 <button

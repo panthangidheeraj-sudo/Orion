@@ -4,3 +4,7 @@ dist-ssr
 *.local
 .DS_Store
 .vite
+# Environment files can hold keys and backend URLs — never commit them.
+.env
+.env.*
+!.env.example

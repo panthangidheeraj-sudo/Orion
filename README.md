@@ -1,4 +1,4 @@
-# VisionField Copilot
+# Orion
 
 A local-first multimodal AI field-technician assistant. Built for the Snapdragon hackathon.
 
@@ -101,11 +101,23 @@ the dev server from a phone on your LAN, use HTTPS or the browser will refuse th
 - `src/app/assistant.ts` → `planSteps()` and `answer()` still exist, and run only when the
   backend is unreachable. The app toasts when it falls back, and System status says the
   local engine is not running, so a demo cannot mistake one for the other.
-- `DEMO_DETECTIONS` / `DEMO_OCR` in the same file stand in for the detector and OCR.
-  They are expressed as percentages of the camera frame, so real boxes drop straight in
-  at any aspect ratio.
 - `src/screens/DocViewer.tsx` renders placeholder page content; a real build renders the
   indexed PDF page there.
+
+**Live Mode — real backend pipeline (2026-09-24 cleanup)**
+- `DEMO_DETECTIONS` / `DEMO_OCR` / `LIVE_PROMPTS` are gone. `src/screens/Live.tsx` now
+  calls the real `api.liveStart()` / `api.liveFrame()` / `api.liveStop()` endpoints, converts
+  their `bbox_norm` detections and pixel-`bbox` text regions into the same percentage-based
+  overlay shape the camera renders, and shows a live Detection/OCR/Tracking/Reasoning status
+  row driven by each frame's real `ran` flags — never a fixed "ready".
+- The AI's spoken turn is a real `api.synthesizeSpeech()` call played through an `<audio>`
+  element with a genuine `AnalyserNode` driving the voice glow, for both the microphone and
+  the AI's own playback. A degraded or unreachable voice service shows "Voice output
+  unavailable" rather than falling back to the browser's own speech synthesis.
+- "End Live & continue in chat" only ever carries forward what was actually observed,
+  inferred or confirmed by the backend during the session (plus any frame the technician
+  explicitly captured) — never demo findings, and it says so plainly when nothing was
+  verified.
 
 ---
 

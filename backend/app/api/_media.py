@@ -16,19 +16,38 @@ from app.memory import sqlite as db
 from app.models._imaging import save_bytes_as_image
 from app.util import contained_path, new_id, sha256_bytes, utc_now
 
-MAX_IMAGE_BYTES = 40 * 1024 * 1024
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_PHOTOS_PER_TURN = 8
+
+
+CHUNK = 1 << 20
 
 
 async def read_upload(file: UploadFile, limit: int = 0) -> bytes:
+    """Read an upload in 1 MB chunks and stop the moment it passes `limit`.
+
+    Reading the whole body first (``await file.read()``) and checking the size
+    afterwards let one oversized request hold the entire file in memory — on a
+    small hosted instance, a handful of those is enough to exhaust it.
+    """
     limit = limit or settings.max_upload_bytes
-    data = await file.read()
-    if len(data) > limit:
+    declared = getattr(file, "size", None)
+    if declared is not None and declared > limit:
         raise PayloadTooLarge(
-            f"file is {len(data) // 1048576} MB; the limit is {limit // 1048576} MB",
-            bytes=len(data), limit=limit)
-    if not data:
+            f"file is {declared // 1048576} MB; the limit is {limit // 1048576} MB",
+            bytes=declared, limit=limit)
+    buf = bytearray()
+    while True:
+        chunk = await file.read(CHUNK)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise PayloadTooLarge(
+                f"file is larger than the {limit // 1048576} MB limit", limit=limit)
+    if not buf:
         raise UnsupportedMedia("the uploaded file is empty")
-    return data
+    return bytes(buf)
 
 
 def store_image(data: bytes, source: str = "photo",

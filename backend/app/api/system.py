@@ -40,7 +40,7 @@ async def system_status() -> Dict[str, Any]:
 
     return {
         "status": "ok",
-        "app": "VisionField Copilot backend",
+        "app": "Orion backend",
         "version": "1.0.0",
         "uptime_s": round(time.time() - STARTED_AT, 1),
         "local_first": {

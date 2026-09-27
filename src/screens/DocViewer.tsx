@@ -30,7 +30,7 @@ export function DocViewer() {
         <div className="empty" style={{ padding: 60 }}>
           <Icon name="book" size={34} stroke="var(--vf-text-2)" width={1.4} />
           <h2 style={{ fontSize: 22 }}>No document open</h2>
-          <p>Add a manual on the Files page and VisionField will cite it by page number.</p>
+          <p>Add a manual on the Files page and Orion will cite it by page number.</p>
           <button type="button" className="btn primary" onClick={() => go('files')}>Open files</button>
         </div>
       </section>
@@ -41,9 +41,9 @@ export function DocViewer() {
 
   return (
     <>
-      <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 16px', height: 60, marginTop: 16, flexWrap: 'wrap' }}>
+      <div className="panel doc-toolbar">
         <Icon name="book" size={20} stroke="var(--vf-text)" width={1.7} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: '1 1 140px' }}>
           <b style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.name}</b>
           <Cap>Indexed on-device · {total} pages</Cap>
         </div>
@@ -114,7 +114,7 @@ export function DocViewer() {
             <Cap>Why this page is open</Cap>
           </div>
           <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--vf-text-2)' }}>
-            VisionField opened page {page} to answer <em>“is 6.8 mm/s within limits for Motor #04?”</em>
+            Orion opened page {page} to answer <em>“is 6.8 mm/s within limits for Motor #04?”</em>
           </p>
           <div style={{ padding: '12px 14px', background: 'var(--vf-track)', border: '1px solid var(--vf-border-strong)', borderRadius: 12 }}>
             <Cap style={{ marginBottom: 6 }}>Matched passage</Cap>

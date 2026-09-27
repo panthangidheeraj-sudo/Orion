@@ -34,7 +34,7 @@ def main() -> int:
     init_db()
 
     rt = runtime_info()
-    print(f"\n{'=' * 78}\nVisionField Copilot — model status\n{'=' * 78}\n")
+    print(f"\n{'=' * 78}\nOrion — model status\n{'=' * 78}\n")
     print(f"Host          {rt.system} {rt.machine}, Python {rt.python}")
     print(f"onnxruntime   {rt.onnxruntime_version or 'not installed'}")
     print(f"providers     {', '.join(rt.available_providers) or 'none'}")

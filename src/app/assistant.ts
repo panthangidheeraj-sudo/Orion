@@ -1,6 +1,7 @@
-import type { Message, Section, Step, VFile, Detection, OcrTag } from './types'
+import type { Message, Step, VFile } from './types'
 import { uid } from './util'
 import { chatReply, classify, type ChatContext } from './conversation'
+import { analyze, composeDiagnosis, hazardGate, matchHazard, pickClarifyingQuestion } from './diagnostics'
 
 /**
  * STUB REASONING LAYER.
@@ -13,6 +14,11 @@ import { chatReply, classify, type ChatContext } from './conversation'
  *   answer(prompt, ctx)     -> the structured technician response
  *
  * Replace the bodies, keep the signatures.
+ *
+ * The diagnostic reasoning itself — which follow-up question to ask, and when
+ * there's enough to actually diagnose something — lives in ./diagnostics.ts as
+ * a symptom/slot decision table, not as hand-written strings in this file. See
+ * that file's header for why.
  */
 
 export interface AskContext {
@@ -24,6 +30,9 @@ export interface AskContext {
   profession?: string
   /** Nobody attaches a photo to say hello, so an attachment settles it. */
   hasAttachments?: boolean
+  /** Earlier user turns in this thread, oldest first — lets the diagnostic
+   * engine carry facts forward instead of re-asking for them. */
+  priorUserTexts?: string[]
 }
 
 const has = (s: string, ...words: string[]) => words.some((w) => s.includes(w))
@@ -38,20 +47,48 @@ function chatContext(ctx: AskContext): ChatContext {
   }
 }
 
+/** The text this turn's diagnosis should be evaluated against: everything the
+ * technician has said in this thread, plus the current message. */
+function threadText(prompt: string, ctx: AskContext): string {
+  return [...(ctx.priorUserTexts || []), prompt].join('\n')
+}
+
 export function planSteps(prompt: string, ctx: AskContext): Step[] {
   // Saying hello is not work. No trail, no fake latency.
   if (!ctx.hasAttachments && classify(prompt)) return []
 
   const p = prompt.toLowerCase()
   const steps: Step[] = []
-  if (ctx.hasHistory) steps.push({ icon: 'history', label: 'Retrieving the previous inspection', ms: 600 })
-  const ready = ctx.files.filter((f) => f.state === 'ready')
-  if (ready.length) {
-    steps.push({ icon: 'folder', label: `Searching your documents — ${ready.length} indexed`, ms: 700 })
-    steps.push({ icon: 'book', label: 'Reading the manual', ms: 900 })
+  if (ctx.hasHistory) steps.push({ icon: 'history', label: 'Recalling what you’ve told me about this job', ms: 500 })
+
+  if (ctx.mode === 'live') steps.push({ icon: 'cam', label: 'Analysing the live camera feed', ms: 800 })
+  else if (ctx.hasAttachments || has(p, 'photo', 'image', 'picture', 'look')) {
+    steps.push({ icon: 'eye', label: 'Analysing the attached image', ms: 800 })
   }
-  if (ctx.mode === 'live') steps.push({ icon: 'cam', label: 'Analysing the live camera', ms: 800 })
-  else if (has(p, 'photo', 'image', 'picture', 'look')) steps.push({ icon: 'eye', label: 'Analysing image', ms: 800 })
+
+  const ready = ctx.files.filter((f) => f.state === 'ready')
+  if (ready.length && !has(p, 'torque', 'nm', 'spec', 'tighten', 'bolt', 'nameplate', 'plate', 'rating', 'serial')) {
+    steps.push({ icon: 'folder', label: `Checking your ${ready.length} indexed document${ready.length > 1 ? 's' : ''} for anything relevant`, ms: 700 })
+  }
+
+  const hazard = !ctx.hasAttachments ? matchHazard(prompt) : null
+  if (hazard) {
+    steps.push({ icon: 'warn', label: 'Checking for an immediate safety issue', ms: 400 })
+  } else if (!ctx.hasAttachments) {
+    const { topics, needsClarifying } = analyze(threadText(prompt, ctx))
+    if (topics.length === 1) {
+      steps.push({
+        icon: 'sparks',
+        label: needsClarifying
+          ? `Working out what to ask about ${topics[0].label}`
+          : `Weighing the likely causes of ${topics[0].label}`,
+        ms: 800,
+      })
+    } else if (topics.length > 1) {
+      steps.push({ icon: 'sparks', label: `Weighing ${topics.map((t) => t.label).join(' and ')} together`, ms: 800 })
+    }
+  }
+
   if (has(p, 'compare', 'last', 'previous', 'worse')) steps.push({ icon: 'gauge', label: 'Comparing with the previous inspection', ms: 750 })
   if (has(p, 'recall', 'latest', 'online', 'web')) {
     steps.push({
@@ -80,36 +117,49 @@ export function answer(prompt: string, ctx: AskContext): Message {
     mode: ctx.mode,
   }
 
-  // --- vibration / bearing
-  if (has(p, 'vibrat', 'bearing', 'rattle', 'noise', 'rumble', 'hot', 'temperature', 'heat')) {
-    const sections: Section[] = [
-      {
-        kind: 'observed',
-        text: `The drive-end bearing housing on ${machine} is running hotter than the fan end and the vibration is strongest along the shaft axis. The coupling faces look parallel.`,
-      },
-      {
-        kind: 'inferred',
-        text: 'Drive-end bearing degradation, most likely lubricant breakdown rather than misalignment.',
-      },
-      {
-        kind: 'next',
-        text: 'Take an axial vibration reading at the drive-end housing at full load. Above 7.1 mm/s RMS the bearing has reached replacement threshold under ISO 10816-3.',
-      },
-    ]
-    return {
-      ...base,
-      head: `Analysed ${ctx.mode === 'live' ? 'the live view' : 'your input'} · ${ready.length ? 'manual matched' : 'no manual indexed'}`,
-      sections,
-      refs: ready.length ? [{ doc: ready[0].name.replace(/\.pdf$/i, ''), page: 42, quote: 'bearing limits' }] : [],
-      confidence: 72,
-      confidenceLabel: 'Likely cause — needs confirmation',
-      memory: ctx.hasHistory ? `Based on your previous inspection of ${machine}` : undefined,
-      notice: {
-        level: 'safety',
-        title: 'Lock out the drive before touching the housing.',
-        text: 'Above 70 °C at the housing. Let it cool or use a non-contact probe for the reading.',
-      },
-      followUps: ['Take the reading now', 'What is the bearing part number?'],
+  // --- safety first: sparks, burning smell, smoke, exposed conductors, arcing.
+  // This runs before anything else in the function, and before the diagnostic
+  // engine below, because a live-conductor or burning report has to be
+  // addressed before any ordinary diagnostic question — never queued behind
+  // one. See ./diagnostics.ts for why this isn't just another canned block.
+  if (!ctx.hasAttachments) {
+    const hazard = matchHazard(prompt)
+    if (hazard) {
+      const allText = threadText(prompt, ctx)
+      const gate = hazardGate(hazard, allText)
+      if (gate) {
+        return { ...base, text: gate.text, notice: gate.notice, followUps: gate.followUps }
+      }
+      // Enough is already known (energised state + location) — fall through
+      // to the diagnostic engine below, which will match the electrical-fault
+      // topic and compose a real diagnosis instead of asking again.
+    }
+  }
+
+  // --- adaptive symptom diagnosis: ask 1-2 targeted questions when something
+  // is still missing, or compose a real diagnosis once enough is known.
+  if (!ctx.hasAttachments) {
+    const allText = threadText(prompt, ctx)
+    const { topics, missingByTopic } = analyze(allText)
+    if (topics.length) {
+      const clarifying = pickClarifyingQuestion(missingByTopic, allText)
+      if (clarifying) {
+        return { ...base, text: clarifying.text }
+      }
+      const diagnosis = composeDiagnosis(topics, allText, machine)
+      return {
+        ...base,
+        head: `Analysed ${ctx.mode === 'live' ? 'the live view' : 'your input'} · ${ready.length ? 'manual matched' : 'no manual indexed'}`,
+        sections: diagnosis.sections,
+        refs: ready.length ? [{ doc: ready[0].name.replace(/\.pdf$/i, ''), page: 42, quote: 'bearing limits' }] : [],
+        confidence: diagnosis.confidence,
+        confidenceLabel: diagnosis.confidenceLabel,
+        memory: ctx.hasHistory ? `Based on your previous inspection of ${machine}` : undefined,
+        notice: diagnosis.safetyHint
+          ? { level: 'safety', title: diagnosis.safetyHint, text: 'Follow safe isolation practice before touching the machine.' }
+          : undefined,
+        followUps: ['Take the reading now', 'Open the report'],
+      }
     }
   }
 
@@ -195,7 +245,22 @@ export function answer(prompt: string, ctx: AskContext): Message {
     }
   }
 
-  // --- fallback: ask for what is missing rather than inventing
+  // --- fallback: ask for what is missing rather than inventing. Reached only
+  // when nothing above — safety, a matched symptom, a spec/nameplate/recall/
+  // report request — applied, so there is genuinely nothing yet to go on.
+  if (ctx.hasAttachments) {
+    return {
+      ...base,
+      head: 'From what you have given me',
+      notice: {
+        level: 'need',
+        title: "I can't read the image without the local backend running.",
+        text: 'Vision analysis happens there, not in this offline demo responder. Start the backend '
+          + '(see Profile & Settings → System status) and ask again, or tell me what you can see and '
+          + "I'll work from that.",
+      },
+    }
+  }
   return {
     ...base,
     head: ctx.mode === 'live' ? 'From the live view' : 'From what you have given me',
@@ -207,22 +272,3 @@ export function answer(prompt: string, ctx: AskContext): Message {
     followUps: ['Open Live Mode', 'Attach a photo'],
   }
 }
-
-/** Placeholder detections for Live Mode until the real detector is wired in. */
-export const DEMO_DETECTIONS: Detection[] = [
-  { id: 'd1', label: 'Motor frame', confidence: 0.96, x: 18, y: 34, w: 44, h: 30, tone: 'neutral' },
-  { id: 'd2', label: 'Drive-end housing', confidence: 0.88, x: 58, y: 44, w: 16, h: 26, tone: 'warn' },
-  { id: 'd3', label: 'Terminal box', confidence: 0.61, x: 33, y: 24, w: 14, h: 11, tone: 'neutral' },
-]
-
-export const DEMO_OCR: OcrTag[] = [
-  { id: 'o1', x: 70, y: 22, label: 'Nameplate', value: '1LE1 · 11 kW · 1460 rpm' },
-  { id: 'o2', x: 70, y: 66, label: 'Bearing code', value: '6308-2Z/C3' },
-]
-
-export const LIVE_PROMPTS = [
-  'Hold the camera steady on the drive end and I will read the nameplate first.',
-  'Nameplate read: 1LE1 · 11 kW · 1460 rpm · frame 132M.',
-  'The drive-end housing is running hotter than the fan end. Put the probe on the housing at the three o’clock position.',
-  'That reading puts it in zone C of ISO 10816-3. I would schedule the bearing for replacement.',
-]

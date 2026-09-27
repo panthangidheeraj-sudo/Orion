@@ -3,8 +3,10 @@ import { Composer } from '../ui/Composer'
 import { Status } from '../ui/bits'
 import { useStore } from '../app/store'
 import { useAsk } from '../app/useAsk'
+import { systemCapabilities } from '../app/capabilities'
 import type { Mode } from '../app/types'
 import { Icon } from '../ui/Icon'
+import TextPressure from '../ui/TextPressure'
 
 const SUGGESTIONS = [
   { icon: 'gauge', text: 'Diagnose a vibration', prompt: 'The drive end is vibrating and running hot. Where do I start?' },
@@ -13,10 +15,14 @@ const SUGGESTIONS = [
 ]
 
 export function Home() {
-  const { go, newConversation, files, addFiles, prefs } = useStore()
+  const { go, newConversation, files, addFiles, prefs, backend } = useStore()
   const { ask } = useAsk()
   const [mode, setMode] = useState<Mode>('normal')
   const [pending, setPending] = useState<string[]>([])
+
+  // Reflect what is actually available — never a fixed "ready". Every state
+  // comes from the backend's own model report or a real browser check.
+  const caps = systemCapabilities(backend, prefs.webSearch)
 
   const start = (text: string) => {
     newConversation()
@@ -30,7 +36,10 @@ export function Home() {
   return (
     <div className="home">
       <div className="home-body">
-        <h1>Every fault, <b>seen clearly</b>.</h1>
+        <div className="hero-pressure" role="heading" aria-level={1} aria-label="Every fault, seen clearly.">
+          <TextPressure as="div" text="Every fault," textColor="rgba(242,243,244,0.72)" minFontSize={26} maxFontSize={78} italic={false} />
+          <TextPressure as="div" text="seen clearly." textColor="#f2f3f4" minFontSize={26} maxFontSize={78} italic={false} />
+        </div>
         <Composer
           compact
           mode={mode}
@@ -45,7 +54,7 @@ export function Home() {
           placeholder="New Chat"
         />
 
-        <div className="suggestions">
+        <div className="suggestions vf-stagger">
           {SUGGESTIONS.map((s) => (
             <button key={s.text} type="button" className="suggestion" onClick={() => start(s.prompt)}>
               <Icon name={s.icon} size={14} stroke="rgba(255,255,255,.55)" />
@@ -57,10 +66,9 @@ export function Home() {
 
       <div className="home-foot">
         <div className="strip">
-          <Status label="Local AI" state="ready" />
-          <Status label="Camera" state="ready" />
-          <Status label="Voice" state="ready" />
-          <Status label="Web search" state={prefs.webSearch ? 'ready' : 'off'} />
+          {caps.map((c) => (
+            <span key={c.key} title={c.detail}><Status label={c.label} state={c.state} word={c.word} /></span>
+          ))}
         </div>
         <button
           type="button"

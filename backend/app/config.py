@@ -43,6 +43,26 @@ class Settings(BaseSettings):
         ]
     )
 
+    # -------------------------------------------------------------- security
+    # Shared access key. When set, every /api route except the public health
+    # and model-status probes requires it in the `X-Orion-Key` header (or
+    # `Authorization: Bearer <key>`). Leave empty only for a backend bound to
+    # 127.0.0.1 — a backend reachable from the internet (Render, a LAN IP)
+    # must set VF_ACCESS_TOKEN, or anyone can read and delete its data.
+    access_token: str = ""
+    # Per-client request budget, per minute. 0 turns a limit off. Live Mode
+    # sends a frame about once a second, so this leaves it ample room.
+    rate_limit_per_minute: int = 300
+    # Tighter budget for the expensive routes: chat, uploads, photo analysis,
+    # voice, direct tool calls, model reloads.
+    heavy_rate_limit_per_minute: int = 30
+    # Trust X-Forwarded-For for the client address. True behind a reverse
+    # proxy such as Render's; set False when the port is exposed directly.
+    trust_proxy_headers: bool = True
+    # Interactive API docs (/docs, /redoc, /openapi.json). Hidden by default
+    # once an access key is configured.
+    expose_docs: bool = True
+
     # ----------------------------------------------------------------- paths
     data_dir: Path = BACKEND_ROOT / "data"
 
@@ -110,7 +130,12 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 140
     retrieval_top_k: int = 6
     page_render_dpi: int = 144
-    max_upload_bytes: int = 200 * 1024 * 1024
+    # Uploads are streamed and cut off at this size, so an oversized file is
+    # refused before it is held in memory.
+    max_upload_bytes: int = 50 * 1024 * 1024
+    # Hard ceilings on what one untrusted file can make the server do.
+    max_pdf_pages: int = 150
+    max_image_pixels: int = 50_000_000
 
     # ------------------------------------------------------------------ live
     live_detect_interval_ms: int = 700

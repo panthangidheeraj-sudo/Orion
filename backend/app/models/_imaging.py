@@ -5,10 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import warnings
+
 import numpy as np
 from PIL import Image
 
+from app.config import settings
 from app.models.base import ImageRef
+
+# Decompression-bomb guard. A tiny PNG can declare a gigantic canvas; Pillow's
+# default only *warns* up to ~179 MP, which is enough to exhaust a small server.
+# Refuse anything above the configured ceiling outright.
+Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
+warnings.simplefilter("error", Image.DecompressionBombWarning)
 
 
 def open_image(ref: ImageRef) -> Image.Image:

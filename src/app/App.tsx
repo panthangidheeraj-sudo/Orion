@@ -1,5 +1,5 @@
 import { Starfield } from '../ui/Starfield'
-import { TabBar, TopBar } from '../ui/TopBar'
+import { Logo, TabBar, TopBar } from '../ui/TopBar'
 import { Icon } from '../ui/Icon'
 import { useStore } from './store'
 import { Home } from '../screens/Home'
@@ -42,26 +42,43 @@ export function App() {
   const { route, prefs } = useStore()
   // Live Mode replaces the starfield with the camera experience.
   const starfield = route !== 'live'
+  const showTabbar = route !== 'onboarding' && route !== 'live'
 
   return (
     <div className="vf-app">
       {starfield ? <Starfield reduceMotion={prefs.reduceMotion} /> : <div className="vf-stage"><div className="vf-vig" /></div>}
 
-      <div className={route === 'chat' ? 'vf-frame chat-frame' : 'vf-frame'}>
+      {/* `has-tabbar` is what reserves room for the fixed phone tab bar: the
+          frame's bottom padding becomes --vf-nav-reserve (tab bar height +
+          its offset + the safe-area inset), so no screen can scroll content
+          underneath it. Screens without the tab bar get the plain inset. */}
+      <div className={['vf-frame', route === 'chat' && 'chat-frame', showTabbar && 'has-tabbar', `route-${route}`].filter(Boolean).join(' ')}>
+        {route !== 'onboarding' && <Logo />}
         {route !== 'onboarding' && <TopBar />}
 
-        {route === 'home' && <Home />}
-        {route === 'convo' && <Convo />}
-        {route === 'chat' && <Chat />}
-        {route === 'live' && <Live />}
-        {route === 'files' && <Files />}
-        {route === 'doc' && <DocViewer />}
-        {route === 'reports' && <Reports />}
-        {route === 'settings' && <Settings />}
-        {route === 'about' && <About />}
-        {route === 'onboarding' && <Onboarding />}
+        {/* `key={route}` remounts this wrapper on every navigation (and on the
+            very first paint after a refresh), so the `vf-enter` fade/slide-in
+            — the same entrance every panel and card in the app uses — plays
+            for whichever screen is now showing. Reduce Motion silences it via
+            the global kill-switch below, same as everywhere else. */}
+        <div
+          key={route}
+          className="vf-enter"
+          style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 }}
+        >
+          {route === 'home' && <Home />}
+          {route === 'convo' && <Convo />}
+          {route === 'chat' && <Chat />}
+          {route === 'live' && <Live />}
+          {route === 'files' && <Files />}
+          {route === 'doc' && <DocViewer />}
+          {route === 'reports' && <Reports />}
+          {route === 'settings' && <Settings />}
+          {route === 'about' && <About />}
+          {route === 'onboarding' && <Onboarding />}
+        </div>
 
-        {route !== 'onboarding' && route !== 'live' && <TabBar />}
+        {showTabbar && <TabBar />}
       </div>
 
       <Toasts />

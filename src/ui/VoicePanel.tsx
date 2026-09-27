@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { Icon } from './Icon'
 
-export type Speaker = 'idle' | 'user' | 'ai'
+/**
+ * Five real states, not three: `listening`/`ai` are backed by a genuine mic
+ * or playback level (see Live.tsx), `processing` covers the gap while a real
+ * backend request is in flight, and `unavailable`/`error` are honest states
+ * for when the real voice pipeline has nothing to say — never a fake speaking
+ * animation with no audio behind it.
+ */
+export type Speaker = 'idle' | 'listening' | 'processing' | 'ai' | 'unavailable' | 'error'
 export interface Line { who: 'You' | 'AI'; text: string; live?: boolean }
 
 const SETS: Record<Speaker, { colours: string[]; base: number; dur: number; label: string; icon: string }> = {
@@ -9,13 +16,25 @@ const SETS: Record<Speaker, { colours: string[]; base: number; dur: number; labe
     colours: ['rgba(210,214,220,.26)', 'rgba(170,175,183,.20)', 'rgba(225,228,232,.16)'],
     base: 0.18, dur: 5.6, label: 'Ready', icon: 'mic',
   },
-  user: {
+  listening: {
     colours: ['rgba(255,255,255,.60)', 'rgba(64,150,255,.52)', 'rgba(150,220,255,.40)'],
     base: 0.34, dur: 3.2, label: 'You are speaking', icon: 'mic',
   },
+  processing: {
+    colours: ['rgba(168,140,255,.42)', 'rgba(150,160,255,.34)', 'rgba(120,140,255,.30)'],
+    base: 0.22, dur: 2.2, label: 'Thinking', icon: 'sparks',
+  },
   ai: {
     colours: ['rgba(168,140,255,.60)', 'rgba(240,123,208,.44)', 'rgba(96,160,255,.50)'],
-    base: 0.3, dur: 4.0, label: 'VisionField is speaking', icon: 'sparks',
+    base: 0.3, dur: 4.0, label: 'AI is speaking', icon: 'sparks',
+  },
+  unavailable: {
+    colours: ['rgba(210,214,220,.16)', 'rgba(170,175,183,.12)', 'rgba(225,228,232,.10)'],
+    base: 0.1, dur: 6, label: 'Voice output unavailable', icon: 'wifioff',
+  },
+  error: {
+    colours: ['rgba(255,158,150,.32)', 'rgba(255,120,110,.24)', 'rgba(255,180,170,.2)'],
+    base: 0.14, dur: 4.4, label: 'Voice error', icon: 'warn',
   },
 }
 

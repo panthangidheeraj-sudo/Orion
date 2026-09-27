@@ -3,6 +3,7 @@ import { Composer } from '../ui/Composer'
 import { AssistantMessage, UserMessage, WorkTrail } from '../ui/Message'
 import { FilesDock } from '../ui/FilesDock'
 import { Icon } from '../ui/Icon'
+import TextPressure from '../ui/TextPressure'
 import { useStore } from '../app/store'
 import { useAsk } from '../app/useAsk'
 import type { Mode } from '../app/types'
@@ -25,10 +26,28 @@ export function Chat() {
     if (!activeId && conversations.length) openConversation(conversations[0].id)
   }, [activeId, conversations, openConversation])
 
+  // Keep the newest message in view while it types itself in, and when the
+  // thread shrinks (phone keyboard opening) — but only if the reader was
+  // already at the bottom. Scrolling up to reread is never yanked back.
+  const stick = useRef(true)
   useEffect(() => {
     const el = scroll.current
     if (el) el.scrollTop = el.scrollHeight
+    stick.current = true
   }, [active?.messages.length, asking?.index])
+
+  useEffect(() => {
+    const el = scroll.current
+    if (!el) return
+    const toBottom = () => { if (stick.current) el.scrollTop = el.scrollHeight }
+    const onScroll = () => { stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80 }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    const ro = new ResizeObserver(toBottom)
+    ro.observe(el)
+    const mo = new MutationObserver(toBottom)
+    mo.observe(el, { childList: true, subtree: true, characterData: true })
+    return () => { el.removeEventListener('scroll', onScroll); ro.disconnect(); mo.disconnect() }
+  }, [])
 
   // Two different lists, and conflating them is what pinned a sent file above
   // the composer forever:
@@ -49,7 +68,7 @@ export function Chat() {
     // shows in the Files dock) and is staged for the next message.
     attachToActive(ids)
     setPending((p) => [...p, ...ids])
-    toast(`${made.length} file${made.length > 1 ? 's' : ''} added`, 'Indexing runs on this device.')
+    toast(`${made.length} file${made.length > 1 ? 's' : ''} added`, 'Indexing has started — watch the status in the Files dock.')
   }
 
   return (
@@ -73,8 +92,10 @@ export function Chat() {
           {(!active || active.messages.length === 0) && !asking && (
             <div className="empty">
               <Icon name="sparks" size={40} stroke="var(--vf-text-2)" width={1.4} />
-              <h2>Start with what you can see</h2>
-              <p>Describe the symptom, attach a photo, or open the camera. Nothing is sent off this device.</p>
+              <div className="empty-pressure">
+                <TextPressure as="h2" text="Start with what you can see" flex={false} minFontSize={18} maxFontSize={40} italic={false} />
+              </div>
+              <p>Describe the symptom, attach a photo, or open the camera.</p>
               <div className="quick">
                 <button type="button" onClick={() => { newConversation('Live inspection'); go('live') }}>
                   <span className="ic"><Icon name="cam" size={17} stroke="var(--vf-text)" /></span>

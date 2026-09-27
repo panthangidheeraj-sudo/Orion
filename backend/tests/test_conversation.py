@@ -90,7 +90,7 @@ def test_capability_answer_describes_what_is_actually_there(client, manual_pdf):
 def test_identity_answer_is_honest_about_the_engine(client):
     body = client.post("/api/chat", json={"message": "are you chatgpt?"}).json()
     text = body["text"].lower()
-    assert "visionfield" in text
+    assert "orion" in text
     if body["model"]["synthetic"]:
         assert "stand-in" in text
         assert "not a language model" in text

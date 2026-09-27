@@ -156,7 +156,7 @@ def _markdown(heading: str, h: Dict[str, Any], summary: Optional[str],
               recommendations: List[str]) -> str:
     job, machine = h["job"], h["machine"]
     L: List[str] = [f"# {heading}", "",
-                    f"*Generated {utc_now()} — VisionField Copilot, on device.*", ""]
+                    f"*Generated {utc_now()} — Orion, on device.*", ""]
 
     L += ["## Machine", ""]
     if machine:

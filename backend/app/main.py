@@ -1,4 +1,4 @@
-"""VisionField Copilot backend.
+"""Orion backend.
 
 A local FastAPI service.  The front-end talks to it over http://127.0.0.1 and
 owns none of the orchestration: §20 and §28 make the backend "the single owner
@@ -28,6 +28,7 @@ from app.errors import VFError
 from app.logging_setup import configure_logging, get_logger
 from app.memory.sqlite import init_db
 from app.models.registry import registry as models
+from app.security import guard, startup_warnings
 from app.util import ms
 
 log = get_logger(__name__)
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     from app.memory import memory_service
 
     memory_service.ensure_user()
+    startup_warnings()
 
     status = models.status()["summary"]
     log.info("models ready=%s unavailable=%s npu=%s",
@@ -56,20 +58,34 @@ async def lifespan(app: FastAPI):
     log.info("shutting down")
 
 
+# The API reference is only published while the backend is unprotected
+# (local development). Once an access key is set it would hand an anonymous
+# visitor a map of every route.
+_docs = settings.expose_docs and not settings.access_token
+
 app = FastAPI(
-    title="VisionField Copilot",
+    title="Orion",
     description="Local-first multimodal field-technician agent. "
                 "The VLM is the brain; everything else is a sense, memory store or tool.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
 )
+
+# Order matters: middleware added later wraps middleware added earlier. The
+# guard (access key, rate limit, headers) is registered first so CORS wraps
+# it — a refused request still carries CORS headers, and the browser shows
+# the app a readable 401/429 instead of an opaque network error.
+app.middleware("http")(guard)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept"],
+    allow_headers=["Content-Type", "Accept", "X-Orion-Key", "Authorization"],
     max_age=600,
 )
 
@@ -119,9 +135,9 @@ for _router in (chat.router, photos.router, live.router, documents.router,
 @app.get("/")
 async def root() -> Dict[str, Any]:
     return {
-        "app": "VisionField Copilot backend",
+        "app": "Orion backend",
         "version": "1.0.0",
-        "docs": "/docs",
+        "docs": "/docs" if _docs else None,
         "status": "/api/system/status",
         "models": "/api/models/status",
         "principle": "The VLM is the brain. Everything else is a sense, memory store, or tool.",

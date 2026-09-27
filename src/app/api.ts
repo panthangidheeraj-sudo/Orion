@@ -12,7 +12,7 @@
  * so a demo can never accidentally pass off the stub as the real thing.
  */
 
-import type { DocRef, Message, Mode, NoticeBlock, Section, SectionKind, Step } from './types'
+import type { DocRef, Detection, Message, Mode, NoticeBlock, OcrTag, Section, SectionKind, Step } from './types'
 import { uid } from './util'
 
 const DEFAULT_BASE = 'http://127.0.0.1:8756'
@@ -20,9 +20,51 @@ const DEFAULT_BASE = 'http://127.0.0.1:8756'
 export const BACKEND_BASE: string =
   import.meta.env.VITE_VF_BACKEND?.replace(/\/$/, '') || DEFAULT_BASE
 
+/* ------------------------------------------------------------ access key */
+
+/**
+ * The backend's shared access key (VF_ACCESS_TOKEN on the server).
+ *
+ * It is typed in by the user (Profile → System status) and kept in this
+ * browser only. It is deliberately NOT read from a VITE_ build variable:
+ * anything baked into the bundle is public to every visitor of the site,
+ * which would make the key pointless.
+ */
+const ACCESS_KEY_STORE = 'vf.accessKey'
+
+export function getAccessKey(): string {
+  try { return localStorage.getItem(ACCESS_KEY_STORE) ?? '' } catch { return '' }
+}
+
+export function setAccessKey(key: string): void {
+  try {
+    const k = key.trim()
+    if (k) localStorage.setItem(ACCESS_KEY_STORE, k)
+    else localStorage.removeItem(ACCESS_KEY_STORE)
+  } catch { /* storage unavailable — the key simply won't persist */ }
+}
+
+/** fetch() against the backend, with the access key attached when one is set. */
+function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers)
+  const key = getAccessKey()
+  if (key) headers.set('X-Orion-Key', key)
+  return fetch(BACKEND_BASE + path, { ...init, headers })
+}
+
+/** Path segment from an id the backend handed us — encoded, never trusted raw. */
+const seg = (v: string | number) => encodeURIComponent(String(v))
+
 /** What the backend says about itself — surfaced in Settings and About. */
 export interface BackendInfo {
   online: boolean
+  /** False until the first probe has finished — the UI says "Checking",
+   * never "Offline", before it actually knows. */
+  checked?: boolean
+  /** Answered its health check but refused our access key (or we have none).
+   * `online` is false in that case, so every caller falls back to the demo
+   * responder; this flag only lets the status strip say why. */
+  locked?: boolean
   version?: string
   model?: { provider: string; model_id: string; accelerator: string; npu: boolean; synthetic: boolean }
   ready?: string[]
@@ -53,26 +95,36 @@ export interface AskResult {
   model?: BackendInfo['model']
 }
 
-let cached: BackendInfo = { online: false }
+let cached: BackendInfo = { online: false, checked: false }
 
 export function lastKnownBackend(): BackendInfo {
   return cached
 }
 
-/** Cheap liveness check. Never throws; a dead backend is a normal state. */
-export async function probe(timeoutMs = 1500): Promise<BackendInfo> {
+/** Cheap liveness check. Never throws; a dead backend is a normal state.
+ * The timeout is generous because a hosted backend (Render and similar) can
+ * take several seconds to answer after a cold start — timing out early would
+ * report a running service as offline. */
+export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
   const ctl = new AbortController()
   const timer = window.setTimeout(() => ctl.abort(), timeoutMs)
   try {
-    const health = await fetch(`${BACKEND_BASE}/api/health`, { signal: ctl.signal })
+    const health = await apiFetch('/api/health', { signal: ctl.signal })
     if (!health.ok) throw new Error(`health ${health.status}`)
 
-    const status = await fetch(`${BACKEND_BASE}/api/models/status`, { signal: ctl.signal })
+    const status = await apiFetch('/api/models/status', { signal: ctl.signal })
     const body = status.ok ? await status.json() : null
     const reasoning = body?.roles?.reasoning
 
+    // Health and model status are public; a keyed route tells us whether
+    // this browser is actually allowed to use the backend.
+    const gate = await apiFetch('/api/tools', { signal: ctl.signal })
+    const locked = gate.status === 401
+
     cached = {
-      online: true,
+      online: !locked,
+      locked,
+      checked: true,
       version: '1.0.0',
       ready: body?.summary?.ready ?? [],
       unavailable: body?.summary?.unavailable ?? [],
@@ -89,7 +141,7 @@ export async function probe(timeoutMs = 1500): Promise<BackendInfo> {
         : undefined,
     }
   } catch (err) {
-    cached = { online: false, reason: err instanceof Error ? err.message : 'unreachable' }
+    cached = { online: false, checked: true, reason: err instanceof Error ? err.message : 'unreachable' }
   } finally {
     window.clearTimeout(timer)
   }
@@ -106,7 +158,7 @@ export async function probe(timeoutMs = 1500): Promise<BackendInfo> {
  * invented timings the offline stub uses.
  */
 export async function ask(text: string, opts: AskOptions): Promise<AskResult> {
-  const res = await fetch(`${BACKEND_BASE}/api/chat/stream`, {
+  const res = await apiFetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: opts.signal,
@@ -186,7 +238,7 @@ export interface UploadedDocument {
 export async function uploadDocument(file: File, signal?: AbortSignal): Promise<UploadedDocument> {
   const form = new FormData()
   form.append('file', file, file.name)
-  const res = await fetch(`${BACKEND_BASE}/api/documents/upload`, { method: 'POST', body: form, signal })
+  const res = await apiFetch('/api/documents/upload', { method: 'POST', body: form, signal })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.reason || `upload failed (${res.status})`)
   return {
@@ -205,14 +257,42 @@ export async function uploadPhoto(blob: Blob, conversationId?: string): Promise<
   const form = new FormData()
   form.append('file', blob, 'frame.jpg')
   if (conversationId) form.append('conversation_id', conversationId)
-  const res = await fetch(`${BACKEND_BASE}/api/photo/upload`, { method: 'POST', body: form })
+  const res = await apiFetch('/api/photo/upload', { method: 'POST', body: form })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.reason || `photo upload failed (${res.status})`)
   return body.image_id as string
 }
 
 export function documentPageUrl(documentId: string, page: number): string {
-  return `${BACKEND_BASE}/api/documents/${documentId}/pages/${page}`
+  return `${BACKEND_BASE}/api/documents/${seg(documentId)}/pages/${seg(page)}`
+}
+
+/* ------------------------------------------------------------- voice/tts */
+
+export interface SynthesizeResult {
+  /** Playable URL, or null when the backend has no TTS model available. */
+  audioUrl: string | null
+  degraded: boolean
+  reason?: string
+  text: string
+}
+
+/** Ask the local backend to speak `text`. Never falls back to a browser voice —
+ * a degraded result means Orion has no real voice to play right now. */
+export async function synthesizeSpeech(text: string, voice?: string): Promise<SynthesizeResult> {
+  const res = await apiFetch('/api/voice/synthesize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body?.reason || `voice synthesis failed (${res.status})`)
+  return {
+    audioUrl: body.audio_id ? `${BACKEND_BASE}/api/voice/audio/${seg(body.audio_id)}` : null,
+    degraded: Boolean(body.degraded),
+    reason: body.reason,
+    text: body.text ?? text,
+  }
 }
 
 /* ------------------------------------------------------------ live mode */
@@ -223,7 +303,7 @@ export interface LiveSession {
 }
 
 export async function liveStart(conversationId?: string, jobId?: string): Promise<LiveSession> {
-  const res = await fetch(`${BACKEND_BASE}/api/live/start`, {
+  const res = await apiFetch('/api/live/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, job_id: jobId }),
@@ -259,7 +339,7 @@ export async function liveFrame(
   if (opts.deep) form.append('deep', 'true')
   if (opts.targetLabel) form.append('target_label', opts.targetLabel)
 
-  const res = await fetch(`${BACKEND_BASE}/api/live/frame`, { method: 'POST', body: form })
+  const res = await apiFetch('/api/live/frame', { method: 'POST', body: form })
   const body = await res.json()
   if (!res.ok) throw new Error(body?.reason || `frame rejected (${res.status})`)
   return {
@@ -275,7 +355,57 @@ export async function liveFrame(
 export async function liveStop(sessionId: string): Promise<void> {
   const form = new FormData()
   form.append('session_id', sessionId)
-  await fetch(`${BACKEND_BASE}/api/live/stop`, { method: 'POST', body: form })
+  await apiFetch('/api/live/stop', { method: 'POST', body: form })
+}
+
+/**
+ * Turn one `liveFrame()` response's raw detections into the percentage-based
+ * `Detection` shape the camera overlay renders. `bbox_norm` is already
+ * `[x, y, w, h]` as fractions of the frame (see `yolo.py`'s `_postprocess`),
+ * so this is a straight ×100 — no invented labels, confidence or "warn"
+ * classification: the backend gives us a label and a confidence, nothing
+ * else, so every real detection renders as the same neutral tone.
+ */
+export function detectionsFromLive(raw: LiveFrameResult['detections']): Detection[] {
+  return raw
+    .filter((d) => Array.isArray(d.bbox_norm) && d.bbox_norm.length === 4)
+    .map((d, i) => {
+      const [x, y, w, h] = d.bbox_norm as number[]
+      return {
+        id: `live-det-${i}-${d.label}`,
+        label: d.label,
+        confidence: d.confidence,
+        x: x * 100, y: y * 100, w: w * 100, h: h * 100,
+        tone: 'neutral' as const,
+      }
+    })
+}
+
+/**
+ * Turn one `liveFrame()` response's raw text regions into on-screen OCR
+ * tags. `ocr_extract` only ever returns a pixel `bbox: [x1, y1, x2, y2]`
+ * (no `bbox_norm` — see `app/models/ocr.py`), so normalizing needs the
+ * frame's own captured pixel size, which the caller knows because it just
+ * captured the frame. The label says only "Detected text" — the backend
+ * gives us recognized text and a location, never a semantic name like
+ * "Nameplate", so we don't invent one.
+ */
+export function ocrFromLive(
+  raw: LiveFrameResult['textRegions'],
+  frameWidth: number,
+  frameHeight: number,
+): OcrTag[] {
+  if (!frameWidth || !frameHeight) return []
+  return raw.map((r, i) => {
+    const [x1, y1, x2, y2] = r.bbox
+    return {
+      id: `live-ocr-${i}`,
+      x: ((x1 + x2) / 2 / frameWidth) * 100,
+      y: ((y1 + y2) / 2 / frameHeight) * 100,
+      label: 'Detected text',
+      value: r.text,
+    }
+  })
 }
 
 /* ------------------------------------------------------- response mapping */
@@ -348,7 +478,7 @@ function refsOf(refs: BackendRef[] | undefined): DocRef[] | undefined {
 }
 
 /** Backend response → the Message shape the UI already renders. */
-function toMessage(body: BackendResponse, mode: Mode): Message {
+export function toMessage(body: BackendResponse, mode: Mode): Message {
   const sections: Section[] = []
   for (const s of body.sections ?? []) {
     const kind = sectionKind(s.kind)

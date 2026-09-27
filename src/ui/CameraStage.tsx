@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import type { Detection, OcrTag } from '../app/types'
 import { fmtDuration } from '../app/util'
@@ -45,9 +45,18 @@ export function Box({ d, selected, onSelect }: { d: Detection; selected: boolean
   )
 }
 
-export function CameraStage({
-  state, elapsed, detections, ocr, selectedId, onSelect, toggles, onToggle, onRetry, children,
-}: {
+/** A single frame grabbed straight from the live `<video>` element, in pixels. */
+export interface CapturedFrame { blob: Blob; width: number; height: number }
+
+export interface CameraStageHandle {
+  /** Draws the current video frame to an offscreen canvas and encodes it as
+   * a JPEG. Resolves null when there is no live video to capture from — the
+   * caller decides what "camera unavailable" means, this never invents a
+   * frame. */
+  captureFrame: () => Promise<CapturedFrame | null>
+}
+
+export const CameraStage = forwardRef<CameraStageHandle, {
   state: CamState
   elapsed: number
   detections: Detection[]
@@ -58,9 +67,25 @@ export function CameraStage({
   onToggle: (key: 'detection' | 'ocr' | 'tracking') => void
   onRetry: () => void
   children?: ReactNode
-}) {
+}>(function CameraStage({
+  state, elapsed, detections, ocr, selectedId, onSelect, toggles, onToggle, onRetry, children,
+}, ref) {
   const video = useRef<HTMLVideoElement | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    captureFrame: () => new Promise((resolve) => {
+      const v = video.current
+      if (!v || v.readyState < 2 || !v.videoWidth || !v.videoHeight) { resolve(null); return }
+      const canvas = document.createElement('canvas')
+      canvas.width = v.videoWidth
+      canvas.height = v.videoHeight
+      const ctx2d = canvas.getContext('2d')
+      if (!ctx2d) { resolve(null); return }
+      ctx2d.drawImage(v, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob((blob) => resolve(blob ? { blob, width: canvas.width, height: canvas.height } : null), 'image/jpeg', 0.82)
+    }),
+  }), [])
 
   useEffect(() => {
     if (state !== 'live') return
@@ -107,7 +132,7 @@ export function CameraStage({
               {state === 'denied' && 'Live Mode still works with photos you attach. Re-allow the camera in your browser’s site settings to inspect in real time.'}
               {state === 'missing' && 'Normal Mode, documents and voice all still work.'}
               {state === 'error' && 'Your transcript and captured frames are safe. Try starting the camera again.'}
-              {(state === 'idle' || state === 'starting') && 'Camera access lets VisionField inspect equipment in Live Mode — reading nameplates and marking components as you move.'}
+              {(state === 'idle' || state === 'starting') && 'Camera access lets Orion inspect equipment in Live Mode — reading nameplates and marking components as you move.'}
             </span>
           </div>
           <button type="button" className="btn primary" onClick={onRetry}>
@@ -147,4 +172,4 @@ export function CameraStage({
       {children}
     </div>
   )
-}
+})

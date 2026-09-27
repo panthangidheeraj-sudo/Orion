@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brandmark, Icon } from '../ui/Icon'
+import { Icon, MoonMark } from '../ui/Icon'
 import { Cap, Chip } from '../ui/bits'
 import { useStore } from '../app/store'
 
@@ -17,8 +17,8 @@ export function Onboarding() {
   const body = [
     {
       title: 'A second technician, on your device',
-      copy: 'VisionField Copilot looks at the equipment with you, reads your manuals, and reasons through the fault the way an experienced colleague would. No cloud, no account.',
-      points: ['Runs on the device’s NPU', 'Works with no signal', 'Nothing is uploaded'],
+      copy: 'Orion looks at the equipment with you, reads your manuals, and reasons through the fault the way an experienced colleague would. No cloud, no account.',
+      points: ['Built to run on the device’s NPU', 'Works with no signal', 'Built local-first'],
     },
     {
       title: 'Describe it, or show it',
@@ -27,7 +27,7 @@ export function Onboarding() {
     },
     {
       title: 'Show it the machine, talk it through',
-      copy: 'In Live Mode the camera takes over the screen. Speak normally — VisionField answers out loud, marks what it can see, and reads nameplates as you move.',
+      copy: 'In Live Mode the camera takes over the screen. Speak normally — Orion answers out loud, marks what it can see, and reads nameplates as you move.',
       points: ['Everything stays on the device', 'Live and Normal are one conversation', 'Tap any detected part to focus the analysis'],
     },
     {
@@ -37,7 +37,7 @@ export function Onboarding() {
     },
     {
       title: 'Tell it who it is helping',
-      copy: 'Your trade and experience change how much VisionField explains. You can edit or delete any of this later.',
+      copy: 'Your trade and experience change how much Orion explains. You can edit or delete any of this later.',
       points: [],
     },
   ][step]
@@ -45,7 +45,7 @@ export function Onboarding() {
   return (
     <div className="onb">
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-        <Brandmark size={30} />
+        <MoonMark size={30} />
         <div className="steps">
           {STEPS.map((s, i) => (
             <div key={s} className={`s ${i === step ? 'now' : i < step ? 'done' : ''}`}>
@@ -62,7 +62,7 @@ export function Onboarding() {
         <p className="copy">{body.copy}</p>
 
         {body.points.length > 0 && (
-          <ul className="onb-list">
+          <ul className="onb-list vf-stagger" key={step}>
             {body.points.map((p) => (
               <li key={p}>
                 <Icon name="check" size={16} stroke="var(--vf-ok)" width={2.1} />

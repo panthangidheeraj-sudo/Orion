@@ -176,9 +176,11 @@ class ToolRegistry:
                 log.info("tool %s returned a structured error: %s", name, exc.code)
                 ok, payload = False, exc.to_dict()
             except Exception as exc:
-                log.warning("tool %s failed: %s", name, type(exc).__name__)
+                # The exception text can contain file paths or internal state;
+                # it goes to the log, and the caller gets only its type.
+                log.warning("tool %s failed: %s: %s", name, type(exc).__name__, exc)
                 ok, payload = False, ToolError(
-                    f"{type(exc).__name__}: {exc}", tool=name).to_dict()
+                    f"{type(exc).__name__} while running the tool", tool=name).to_dict()
 
         return {"ok": ok, "tool": name, "category": spec.category,
                 "duration_ms": t["ms"], "source": payload.pop("source", spec.category), **payload}

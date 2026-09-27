@@ -16,7 +16,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 
 from app.agent.orchestrator import orchestrator
 from app.agent.tool_registry import registry as tool_registry
-from app.api._media import read_upload, store_image
+from app.api._media import MAX_IMAGE_BYTES, read_upload, store_image
 from app.errors import ValidationFailed
 from app.logging_setup import get_logger
 from app.memory import memory_service as M
@@ -55,7 +55,7 @@ async def analyze(file: UploadFile = File(...),
                   job_id: Optional[str] = Form(None),
                   inspection_id: Optional[str] = Form(None),
                   web: bool = Form(False)) -> Dict[str, Any]:
-    data = await read_upload(file)
+    data = await read_upload(file, limit=MAX_IMAGE_BYTES)
     return await _analyze([data], question, conversation_id, job_id, inspection_id, web)
 
 
@@ -69,7 +69,7 @@ async def analyze_multiple(files: List[UploadFile] = File(...),
     if len(files) > 8:
         raise ValidationFailed("at most 8 photos belong to one inspection turn",
                                received=len(files))
-    datas = [await read_upload(f) for f in files]
+    datas = [await read_upload(f, limit=MAX_IMAGE_BYTES) for f in files]
     return await _analyze(datas, question, conversation_id, job_id, inspection_id, web)
 
 
@@ -79,7 +79,7 @@ async def upload_only(file: UploadFile = File(...),
                       inspection_id: Optional[str] = Form(None)) -> Dict[str, Any]:
     """Store a photo without reasoning about it yet — used when the technician
     attaches images before typing the question."""
-    data = await read_upload(file)
+    data = await read_upload(file, limit=MAX_IMAGE_BYTES)
     return store_image(data, source="photo", conversation_id=conversation_id,
                        inspection_id=inspection_id)
 

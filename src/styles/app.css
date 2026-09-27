@@ -1,6 +1,9 @@
 /* ---------------------------------------------------------------- reset */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* The app scrolls inside its own panels; the document itself never scrolls,
+   in either direction, so nothing can drag the whole page sideways. */
+html, body { overflow: hidden; }
 body {
   margin: 0;
   background: var(--vf-black);
@@ -31,7 +34,12 @@ input, textarea { font: inherit; color: inherit; }
 }
 
 /* ---------------------------------------------------------------- shell */
-.vf-app { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.vf-app {
+  position: relative; display: flex; flex-direction: column; overflow: hidden;
+  /* dvh tracks the visible viewport on phones (URL bar shown/hidden, and the
+     keyboard with interactive-widget=resizes-content); vh is the fallback. */
+  height: 100vh; height: 100dvh;
+}
 .vf-stage { position: absolute; inset: 0; z-index: 0; }
 .vf-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .vf-vig {
@@ -49,28 +57,26 @@ input, textarea { font: inherit; color: inherit; }
 /* Chat wants the width: the conversation list hugs the left edge and the thread
    takes everything that is left. The centred nav is unaffected. */
 .vf-frame.chat-frame { padding-left: 20px; padding-right: 20px; }
-@media (max-width: 767px) { .vf-frame.chat-frame { padding-left: 12px; padding-right: 12px; } }
 
 /* ---------------------------------------------------------------- top bar */
+/* Pinned to the corner independently of the centred nav pill below, so the
+   nav's own centring is unaffected by the logo's width. */
+.vf-logo {
+  position: absolute; top: calc(20px + var(--vf-safe-top)); left: var(--vf-gutter);
+  z-index: 2; display: flex; align-items: center; flex: none;
+  border-radius: 8px; padding: 2px;
+  transition: opacity var(--vf-instant) var(--vf-ease);
+}
+.vf-logo:hover { opacity: 0.82; }
+/* The centred pill. Its width leaves room for the corner logo on both sides,
+   so the two can never overlap on a tablet-width window. The items and the
+   gooey active-pill come from GooeyNav (ui/GooeyNav.css). */
 .vf-nav {
-  align-self: center; width: 680px; max-width: 100%; height: 48px; flex: none;
-  display: flex; align-items: center; gap: 2px; padding: 4px;
+  align-self: center; width: min(680px, calc(100% - 96px)); height: 48px; flex: none;
+  display: flex; align-items: center; padding: 4px;
   background: var(--vf-panel); border: 1px solid var(--vf-border);
   border-radius: 14px; box-shadow: var(--vf-e3);
 }
-.navshell { align-self: center; position: relative; flex: none; }
-.vf-nav .navitem {
-  flex: 1 1 0; height: 40px; display: flex; align-items: center; justify-content: center; gap: 7px;
-  border: 0; background: transparent; cursor: pointer;
-  border-radius: 10px; font-size: 13.5px; font-weight: 500; color: var(--vf-text-2);
-  transition: background var(--vf-instant) var(--vf-ease), color var(--vf-instant) var(--vf-ease);
-}
-.vf-nav .navitem:hover { background: var(--vf-track); color: var(--vf-text); }
-.vf-nav .navitem[aria-current='page'] {
-  background: var(--vf-invert); color: var(--vf-on-invert); font-weight: 600;
-}
-.vf-nav .navitem[aria-current='page']:hover { background: #ffffff; }
-.navitem svg.flip { transform: rotate(180deg); }
 
 /* ------------------------------------------------- conversations page */
 .convopage-row { position: relative; display: flex; align-items: center; border-bottom: 1px solid var(--vf-track); }
@@ -187,6 +193,13 @@ input, textarea { font: inherit; color: inherit; }
   letter-spacing: -0.035em; text-align: center;
 }
 .home h1 b { font-weight: 600; }
+/* "Every fault, seen clearly." — two TextPressure lines, each spread to the
+   same measure so they read as one justified block. */
+.hero-pressure {
+  width: min(100%, 640px); display: flex; flex-direction: column; gap: 2px;
+  margin: 0 0 clamp(18px, 3.6vh, 30px);
+}
+.home-body > .composer { flex: none; }
 .home-sub { max-width: 620px; margin-bottom: 30px; text-align: center; font-size: 16.5px; color: rgba(255,255,255,0.62); text-wrap: pretty; }
 .suggestions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; justify-content: center; }
 .suggestion {
@@ -215,8 +228,13 @@ input, textarea { font: inherit; color: inherit; }
   max-height: 168px; min-height: 28px; overflow-y: auto;
 }
 .composer textarea::placeholder { color: var(--vf-placeholder); }
-.composer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; }
-.composer-left, .composer-right { display: flex; align-items: center; gap: 8px; }
+.composer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; min-width: 0; }
+.composer-left, .composer-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.composer-left { flex: none; }
+.composer-right { flex: 0 1 auto; justify-content: flex-end; }
+.composer .modetoggle { flex: 0 1 auto; min-width: 0; }
+.composer .modetoggle button { min-width: 0; }
+.composer .mt-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Controls inside the composer sit at 38px on pointer devices and go back to
    44px on touch, where the bigger target actually matters. */
@@ -250,7 +268,7 @@ input, textarea { font: inherit; color: inherit; }
 .filechip {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 8px;
   background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: var(--vf-r-btn);
-  max-width: 260px;
+  max-width: min(260px, 100%); min-width: 0;
 }
 .filechip .thumb {
   display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none;
@@ -332,12 +350,12 @@ input, textarea { font: inherit; color: inherit; }
 .filesdock-row .st { font-family: var(--vf-mono); font-size: 10px; letter-spacing: 0.04em; flex: none; }
 .filesdock-foot { display: flex; gap: 6px; padding: 8px 2px 2px; border-top: 1px solid var(--vf-border); margin-top: 6px; }
 .filesdock-foot .btn { padding: 0 8px; gap: 6px; font-size: 12px; }
-.thread-scroll { flex: 1 1 auto; width: 100%; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 50px 0 14px; }
+.thread-scroll { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 50px 0 14px; }
 .thread-scroll > * { width: 100%; max-width: 880px; }
 
 .msg-user { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .msg-user .bubble {
-  max-width: 460px; padding: 9px 13px; background: rgba(255,255,255,0.055);
+  max-width: min(460px, 88%); overflow-wrap: anywhere; padding: 9px 13px; background: rgba(255,255,255,0.055);
   border: 1px solid rgba(255,255,255,0.14); border-radius: 14px 14px 5px 14px;
   font-size: 14px; line-height: 1.5;
   -webkit-backdrop-filter: var(--vf-glass-blur); backdrop-filter: var(--vf-glass-blur);
@@ -345,61 +363,62 @@ input, textarea { font: inherit; color: inherit; }
 .msg-user .meta { font-family: var(--vf-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.42); }
 
 .answer {
+  min-width: 0; overflow-wrap: anywhere;
   background: var(--vf-panel-glass); border: 1px solid var(--vf-edge);
-  border-radius: 17px; box-shadow: var(--vf-e3); padding: 15px 18px;
+  border-radius: 16px; box-shadow: var(--vf-e3); padding: 12px 15px;
   -webkit-backdrop-filter: var(--vf-glass-blur); backdrop-filter: var(--vf-glass-blur);
 }
-.answer-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.answer-head .id { display: flex; flex-direction: column; gap: 2px; }
-.answer-head .id b { font-family: var(--vf-display); font-size: 13.5px; font-weight: 600; }
+.answer-head { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.answer-head .id { display: flex; flex-direction: column; gap: 1px; }
+.answer-head .id b { font-family: var(--vf-display); font-size: 12.5px; font-weight: 600; }
 
 /* Prose in an assistant turn — a conversational reply, or any answer that came
    back as running text rather than sections. */
-.answer .prose p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--vf-text-2); }
+.answer .prose p { margin: 0 0 6px; font-size: 13px; line-height: 1.48; color: var(--vf-text-2); }
 .answer .prose p:last-child { margin-bottom: 0; }
-.answer .prose p.spaced { margin-top: 13px; }
+.answer .prose p.spaced { margin-top: 9px; }
 /* A greeting is a short exchange, not a report: tighten it up.
    NB the modifier is `prose-chat`, not `chat` — `.chat` is the chat screen's
    own flex layout, and reusing it here turned every paragraph into a column. */
 .answer .prose.prose-chat { margin-top: -4px; }
 .answer .prose.prose-chat p { color: var(--vf-text); }
 .aimark {
-  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none;
-  border-radius: 10px; background: linear-gradient(145deg, #26292f, #15171b); border: 1px solid var(--vf-border-strong);
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none;
+  border-radius: 9px; background: linear-gradient(145deg, #26292f, #15171b); border: 1px solid var(--vf-border-strong);
 }
-.sections { display: flex; flex-direction: column; gap: 14px; }
-.section { display: flex; gap: 12px; }
+.sections { display: flex; flex-direction: column; gap: 10px; }
+.section { display: flex; gap: 10px; }
 .section .badge {
-  display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: none;
-  margin-top: 1px; border-radius: 8px; background: var(--vf-inset); border: 1px solid var(--vf-border);
+  display: flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex: none;
+  margin-top: 1px; border-radius: 7px; background: var(--vf-inset); border: 1px solid var(--vf-border);
 }
 .section.observed .badge { background: rgba(67,217,163,0.11); border-color: rgba(67,217,163,0.3); }
 .section.inferred .badge { background: var(--vf-track); border-color: var(--vf-border-strong); }
 .section .body { flex: 1 1 auto; min-width: 0; }
-.section .body p { font-size: 14px; line-height: 1.58; }
-.answer-foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--vf-border); }
+.section .body p { font-size: 13px; line-height: 1.46; }
+.answer-foot { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--vf-border); }
 .memory {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 9px 12px;
-  background: var(--vf-inset); border: 1px dashed var(--vf-border-strong); border-radius: 11px; font-size: 12.5px; color: var(--vf-text-2);
+  display: flex; align-items: center; gap: 7px; margin-bottom: 10px; padding: 7px 10px;
+  background: var(--vf-inset); border: 1px dashed var(--vf-border-strong); border-radius: 10px; font-size: 11.5px; color: var(--vf-text-2);
 }
 
-.notice { display: flex; gap: 12px; padding: 14px 16px; border-radius: 14px; border: 1px solid; }
+.notice { display: flex; gap: 10px; padding: 11px 13px; border-radius: 13px; border: 1px solid; }
 .notice.safety { background: rgba(245,185,66,0.11); border-color: rgba(245,185,66,0.32); }
 .notice.need { background: var(--vf-track); border-color: var(--vf-border-strong); }
 .notice.confirmed { background: rgba(67,217,163,0.11); border-color: rgba(67,217,163,0.3); }
 .notice.error { background: rgba(255,122,107,0.12); border-color: rgba(255,122,107,0.34); }
-.notice .kind { margin-bottom: 5px; }
-.notice .title { font-size: 14px; font-weight: 600; line-height: 1.45; }
-.notice .text { font-size: 13.5px; line-height: 1.6; color: var(--vf-text-2); margin-top: 4px; }
+.notice .kind { margin-bottom: 4px; }
+.notice .title { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.notice .text { font-size: 12.5px; line-height: 1.48; color: var(--vf-text-2); margin-top: 3px; }
 
-.confidence { display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 13px; }
+.confidence { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 12px; }
 .meter { position: relative; height: 5px; background: var(--vf-track); border-radius: 999px; overflow: hidden; }
 .meter i { position: absolute; inset: 0 auto 0 0; background: var(--vf-text-2); border-radius: 999px; }
 
-.evidence { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-.evidence figure { width: 132px; margin: 0; background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 12px; overflow: hidden; }
-.evidence .shot { height: 78px; background: #0b0c0e; display: block; width: 100%; object-fit: cover; }
-.evidence figcaption { padding: 8px 10px; font-size: 11.5px; color: var(--vf-text-2); line-height: 1.35; }
+.evidence { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+.evidence figure { width: 116px; margin: 0; background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 11px; overflow: hidden; }
+.evidence .shot { height: 68px; background: #0b0c0e; display: block; width: 100%; object-fit: cover; }
+.evidence figcaption { padding: 6px 8px; font-size: 11px; color: var(--vf-text-2); line-height: 1.3; }
 
 .activity {
   display: inline-flex; align-items: center; gap: 11px; padding: 11px 16px 11px 13px;
@@ -416,6 +435,7 @@ input, textarea { font: inherit; color: inherit; }
 
 .empty { display: flex; flex-direction: column; align-items: center; gap: 0; text-align: center; max-width: 560px; margin: auto; padding: 12px 0; }
 .empty h2 { margin: 22px 0 10px; font-size: 30px; font-weight: 500; }
+.empty-pressure { width: 100%; margin: 18px 0 10px; }
 .empty p { margin-bottom: 28px; color: rgba(255,255,255,0.58); }
 .quick { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .quick button {
@@ -497,6 +517,11 @@ input, textarea { font: inherit; color: inherit; }
 .filecard .info { padding: 12px 13px 13px; }
 .filecard .info b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.doc-toolbar {
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px;
+  min-height: 60px; padding: 10px 16px; margin-top: 16px;
+}
+.reports-side { width: 258px; }
 .doc { display: flex; gap: 20px; flex: 1 1 auto; min-height: 0; margin-top: 16px; }
 .doc-rail { width: 100px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .doc-rail button { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; cursor: pointer; padding: 0; }
@@ -517,7 +542,7 @@ input, textarea { font: inherit; color: inherit; }
 /* ---------------------------------------------------------------- settings */
 /* Settings is ONE panel. The sections inside are recessed minipages, packed by
    multicolumn so a short section never leaves a ragged hole beside a tall one. */
-.settings-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 0 6px; }
+.settings-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 0 6px; }
 
 /* No scrollbar furniture anywhere inside the app. Wheel, trackpad, touch and
    keyboard scrolling all still work; Tab scrolls the focused control into view. */
@@ -538,24 +563,46 @@ input, textarea { font: inherit; color: inherit; }
   padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--vf-border);
 }
 .settings-head h1 { font-size: clamp(21px, 2.4vw, 28px); font-weight: 500; letter-spacing: -0.03em; }
-/* Two deliberate stacks rather than multicolumn: the browser balances by height
-   alone and left a 230px void. Split by measured height AND meaning instead —
-   left is you and how it looks, right is what the assistant can reach. */
-.settings-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
-.settings-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.settings-col .minicard { margin: 0; }
-.minicard {
-  break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid;
-  margin: 0 0 18px; padding: 20px 20px 14px;
-  background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 16px;
+/* A sidebar of categories plus a single content panel — one thing open at a
+   time, rather than every card stacked and visible at once. The sidebar
+   stays put; only .settings-panel remounts (see the `key={active}` in
+   Settings.tsx), which is what lets it pick up the app's ordinary vf-enter
+   fade on every switch. */
+.settings-body { display: flex; align-items: flex-start; gap: 8px; }
+.settings-sidebar {
+  flex: none; width: 216px; display: flex; flex-direction: column; gap: 2px;
+  padding-right: 16px; margin-right: 12px; border-right: 1px solid var(--vf-border);
+  position: sticky; top: 0;
 }
-.minicard h2 { font-size: 16px; }
-.minicard .lead { margin: 0 0 16px; font-size: 12.5px; color: var(--vf-muted); line-height: 1.55; }
-.minicard .field input { background: var(--vf-track); border-color: var(--vf-border-strong); }
-.minicard .theme-opt { background: var(--vf-track); border-color: var(--vf-border-strong); }
-.minicard .theme-opt[aria-pressed='true'] { background: #31353c; border: 2px solid var(--vf-text); }
-.minicard .btn { background: var(--vf-track); }
-@media (max-width: 1100px) { .settings-cols { grid-template-columns: 1fr; } }
+.settings-navitem {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 11px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--vf-text-2); font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer;
+  transition: background var(--vf-instant) var(--vf-ease), color var(--vf-instant) var(--vf-ease);
+}
+.settings-navitem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-navitem:hover { background: var(--vf-track); color: var(--vf-text); }
+.settings-navitem[aria-current='page'] { background: var(--vf-invert); color: var(--vf-on-invert); font-weight: 600; }
+.settings-navitem[aria-current='page']:hover { background: #ffffff; }
+.settings-panel { flex: 1 1 auto; min-width: 0; padding: 2px 4px 24px; }
+.settings-panel h2 { font-size: 17px; }
+.settings-panel .lead { margin: 4px 0 18px; font-size: 12.5px; color: var(--vf-muted); line-height: 1.55; }
+.settings-panel .field input { background: var(--vf-track); border-color: var(--vf-border-strong); }
+.settings-panel .theme-opt { background: var(--vf-track); border-color: var(--vf-border-strong); }
+.settings-panel .theme-opt[aria-pressed='true'] { background: #31353c; border: 2px solid var(--vf-text); }
+.settings-panel .btn { background: var(--vf-track); }
+.profile-top { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.profile-avatar {
+  display: grid; place-items: center; width: 88px; height: 88px; flex: none;
+  border-radius: 24px; background: linear-gradient(150deg, #33373d, #1a1c20);
+  border: 1px solid var(--vf-border-strong); font-family: var(--vf-mono); font-size: 24px;
+}
+.profile-fields { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.status-row {
+  display: flex; align-items: center; gap: 12px; padding: 13px 15px; min-width: 0;
+  background: var(--vf-track); border: 1px solid var(--vf-border); border-radius: 13px;
+}
+.access-key { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--vf-track); }
 .srow { display: flex; align-items: center; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--vf-track); }
 .srow:last-child { border-bottom: 0; }
 .srow .lbl { flex: 1 1 auto; min-width: 0; }
@@ -616,6 +663,8 @@ input, textarea { font: inherit; color: inherit; }
 }
 .about > * { flex: none; }
 .about h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 300; }
+.about-hero { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+.about-pressure { width: min(100%, 560px); }
 .about h1 b { font-weight: 600; }
 .about .slot {
   width: 100%; max-width: 820px; min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -623,40 +672,163 @@ input, textarea { font: inherit; color: inherit; }
 }
 .about .slot p { max-width: 420px; font-size: 13.5px; color: rgba(255,255,255,0.36); line-height: 1.6; }
 
-/* ---------------------------------------------------------------- mobile */
+/* ---------------------------------------------------------------- responsive */
+/* One layout architecture for phones, not per-screen offsets:
+   - the tab bar is position: fixed, sized and placed from --vf-tabbar-* tokens;
+   - .vf-frame.has-tabbar reserves exactly that space (--vf-nav-reserve) as its
+     bottom padding, so every screen's own scroll area ends above the bar;
+   - screens are flex columns whose scroll areas are `min-height: 0` children,
+     so the chat composer always sits in view above the bar;
+   - while a text field is focused (keyboard up) the bar steps aside and its
+     reserve collapses, so the composer rides on top of the keyboard. */
 .tabbar { display: none; }
+
 @media (max-width: 767px) {
+  /* ---- shell */
+  .vf-frame { padding: calc(10px + var(--vf-safe-top)) var(--vf-gutter) calc(14px + var(--vf-safe-bottom)); }
+  .vf-frame.has-tabbar { padding-bottom: var(--vf-nav-reserve); }
+  .vf-frame.chat-frame { padding-left: var(--vf-gutter); padding-right: var(--vf-gutter); }
+  .vf-logo { position: static; align-self: flex-start; margin: 0 0 8px -2px; padding: 4px; }
   .vf-nav { display: none; }
+
   .tabbar {
-    display: flex; align-items: center; gap: 4px; flex: none; padding: 4px; margin-top: 10px;
-    background: var(--vf-panel); border: 1px solid var(--vf-edge); border-radius: 20px; box-shadow: var(--vf-e3);
+    display: block; position: fixed; z-index: 30;
+    left: var(--vf-gutter); right: var(--vf-gutter);
+    bottom: calc(var(--vf-tabbar-gap) + var(--vf-safe-bottom));
+    max-width: 560px; margin: 0 auto; height: var(--vf-tabbar-h); padding: 4px;
+    background: var(--vf-panel); border: 1px solid var(--vf-edge); border-radius: 20px;
+    box-shadow: var(--vf-e3);
   }
-  .tabbar .navitem { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 56px; border: 0; background: transparent; cursor: pointer; border-radius: 14px; font-size: 10.5px; font-weight: 500; color: var(--vf-muted); }
-  .tabbar .navitem[aria-current='page'] { background: var(--vf-track); color: var(--vf-text); font-weight: 600; }
-  .tabbar .navitem svg.flip { transform: rotate(180deg); }
-  .chat { gap: 0; }
-  .filesdock { position: static; width: 100%; margin-bottom: 10px; }
-  .thread-scroll { padding-top: 0; }
-  .sidebar, .sidebar.closed {
-    display: flex; position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(362px, 92vw);
-    border-radius: 0 20px 20px 0; transform: translateX(-102%);
-    transition: transform var(--vf-panel-dur) var(--vf-ease);
+  /* Chat only: while typing, the keyboard owns the bottom of the screen, so
+     the bar steps aside and the composer sits directly on the keyboard.
+     (Composer buttons don't take focus — see Composer.tsx — so tapping Send
+     doesn't blur the field and shift the layout mid-tap.) */
+  .vf-app:has(.route-chat .composer textarea:focus) .tabbar { display: none; }
+  .vf-app:has(.route-chat .composer textarea:focus) .vf-frame.has-tabbar {
+    padding-bottom: calc(10px + var(--vf-safe-bottom));
   }
-  .sidebar.open { transform: none; }
-  .live-lower { flex-direction: column; min-height: 0; }
-  .live-controls { width: 100%; flex-direction: row; align-items: center; }
-  .doc { flex-direction: column; }
-  .doc-rail { width: 100%; flex-direction: row; overflow-x: auto; }
-  .doc-aside { width: 100%; }
-  .settings-cols { grid-template-columns: 1fr; }
-  .settings-shell { padding: 18px 16px 4px; }
-  .minicard { padding: 16px 16px 10px; }
-  .home h1 { text-align: left; }
-  .home-sub { text-align: left; }
-  .composer { border-radius: 22px; }
+
+  /* ---- home */
+  /* The hero, composer, chips and status read as one centred group rather
+     than content pinned to the top and a status strip stranded at the bottom. */
+  .home { overflow-y: auto; overflow-x: hidden; justify-content: safe center; gap: 22px; }
+  .home-body { flex: none; overflow: visible; padding: 0; }
+  .home-foot { flex: none; }
+  .hero-pressure { margin-bottom: 18px; }
+  .suggestions { margin-top: 14px; gap: 8px; }
+  .suggestion { height: 40px; padding: 0 13px; font-size: 12.5px; }
+  .home-foot { justify-content: center; gap: 8px 16px; padding-top: 8px; }
+  .strip { justify-content: center; gap: 6px 14px; }
+  .strip .status { font-size: 9.5px; letter-spacing: 0.06em; }
+  .home-sub { text-align: center; }
+
+  /* ---- composer */
+  .composer { padding: 10px 8px 8px; gap: 8px; border-radius: 20px; }
+  .composer textarea { font-size: 16px; padding: 4px 6px 2px; } /* 16px: no zoom-on-focus */
+  .composer-row { gap: 6px; padding: 0 2px; }
+  .composer-left, .composer-right { gap: 6px; }
+  .composer .modetoggle button { padding: 0 9px; gap: 5px; font-size: 12.5px; }
+
+  /* ---- chat */
+  .chat { gap: 0; margin-top: 0; }
+  .thread { gap: 0; }
+  .filesdock { position: static; width: 100%; margin-bottom: 10px; flex: none; }
+  .thread-scroll { gap: 14px; padding: 2px 0 12px; scroll-padding-bottom: 12px; }
   .thread-scroll > * { max-width: 100%; }
+  .thread > .composer { flex: none; }
+  .answer { padding: 11px 12px; border-radius: 15px; }
+  .section { gap: 9px; }
+  .notice { padding: 10px 11px; }
+  .empty { padding: 4px 0; }
+  .empty p { margin-bottom: 18px; font-size: 13.5px; }
+  .quick button { padding: 12px 13px; gap: 12px; }
+
+  /* ---- conversations / sheets / files / reports / documents */
+  .sheet-page { margin-top: 0; border-radius: 18px; }
+  .sheet-head { padding: 14px 14px 12px; gap: 10px; }
+  .sheet-head h2 { font-size: 18px; }
+  .sheet-head .sheet-spacer { display: none; }
+  .sheet-head .search { flex: 1 1 180px !important; width: auto !important; }
+  .sheet-body { overflow-x: hidden; }
+  .sheet-foot { padding: 12px 14px; flex-wrap: wrap; }
+  .grid-files { padding: 14px; gap: 12px; }
   .filecard { width: 100%; }
+  /* Documents and reports stack on a phone and scroll as one column, instead
+     of three panes squeezing each other inside a fixed-height row. */
+  .doc { flex-direction: column; margin-top: 0; gap: 12px; overflow-y: auto; overflow-x: hidden; }
+  .doc > * { flex: none; }
+  .doc-page { overflow: visible; }
+  .doc-rail { width: 100%; flex-direction: row; overflow-x: auto; flex: none; }
+  .doc-aside { width: 100%; }
+  .doc-toolbar { margin-top: 0; padding: 8px 12px; }
+  .paper { padding: 22px 18px; }
+  .reports-side, .sidebar.reports-side {
+    position: static; transform: none; display: flex; width: 100%; max-height: 190px;
+    border-radius: 18px; flex: none;
+  }
+  .report-kv { grid-template-columns: 1fr; }
+
+  /* ---- live */
+  .live { gap: 12px; margin-top: 0; overflow-y: auto; overflow-x: hidden; }
+  .live > * { flex: none; }
+  .camera {
+    flex: none; width: 100%; aspect-ratio: 3 / 4; max-height: 56dvh; min-height: 240px;
+    border-radius: 18px;
+  }
+  .camera .scrim-top { flex-wrap: wrap; gap: 6px; padding: 10px; }
+  .camera .scrim-bottom { padding: 10px 12px; }
+  .camtoggle { height: 30px; padding: 0 9px; }
+  .live-lower { flex: none; flex-direction: column; gap: 12px; min-height: 0; }
+  .voicepanel { min-height: 150px; }
+  .live-controls { width: 100%; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
+  .endlive { min-height: 48px; }
+
+  /* ---- profile & settings */
+  .settings-page { padding: 0 0 8px; }
+  .settings-shell { padding: 16px 14px 10px; border-radius: 18px; }
+  .settings-head { padding-bottom: 12px; margin-bottom: 12px; gap: 6px 12px; }
+  .settings-body { flex-direction: column; }
+  .settings-sidebar {
+    width: 100%; flex-direction: row; overflow-x: auto; position: static;
+    border-right: 0; border-bottom: 1px solid var(--vf-border);
+    padding-right: 0; padding-bottom: 10px; margin-right: 0; margin-bottom: 14px;
+    scrollbar-width: none;
+  }
+  .settings-sidebar::-webkit-scrollbar { display: none; }
+  .settings-navitem { flex: none; width: auto; min-height: 44px; }
+  .settings-panel { padding: 2px 0 12px; }
+  .profile-top { gap: 14px; }
+  .profile-avatar { width: 56px; height: 56px; border-radius: 16px; font-size: 18px; }
+  .profile-fields { flex-basis: 100%; gap: 12px; }
+  .field input { font-size: 16px; }
+  .srow { gap: 14px; padding: 13px 0; }
+  .theme-opt { padding: 11px; }
+  .theme-opt .swatch { height: 42px; }
+  .status-row { padding: 11px 12px; gap: 10px; }
+
+  /* ---- onboarding / about / overlays */
+  .onb { overflow-x: hidden; }
+  .onb-card { padding: 20px 16px 16px; border-radius: 18px; }
+  .onb-foot .btn { flex: 1 1 auto; }
+  .about { gap: 22px; overflow-x: hidden; }
+  .about .slot { min-height: 180px; padding: 28px 18px; }
+  .modal { padding: 20px 18px; }
+  .modal .actions { flex-wrap: wrap; gap: 10px; }
+  .modal .actions .btn { flex: 1 1 auto; }
+  .toast-wrap {
+    bottom: calc(var(--vf-tabbar-h) + var(--vf-tabbar-gap) + var(--vf-safe-bottom) + 10px);
+    width: calc(100% - 2 * var(--vf-gutter)); max-width: 420px;
+  }
+  .toast { width: 100%; }
 }
+
+/* Very narrow phones: the mode toggle drops its words and keeps its icons
+   (each button carries an aria-label), so nothing is clipped at 320–350px. */
+@media (max-width: 350px) {
+  .composer .mt-label { display: none; }
+  .composer .modetoggle button { padding: 0 10px; }
+}
+
 @media (max-width: 1023px) and (min-width: 768px) {
   .sidebar { width: 240px; }
   .live-controls { width: 240px; }
@@ -676,8 +848,34 @@ input, textarea { font: inherit; color: inherit; }
 .spin { animation: vf-spin 1.05s linear infinite; }
 .sweep { position: absolute; inset: 0 auto 0 0; width: 38%; background: var(--vf-text-2); border-radius: 999px; animation: vf-sweep 1.5s ease-in-out infinite; }
 
-/* Driven by the Reduce motion switch in Settings, which is seeded from the
-   operating system on first run and overridable from there afterwards. */
+/* ---------------------------------------------------------------- entrance */
+/* One entrance system, reused everywhere a screen or a group of panels/cards
+   first appears, rather than one-off animations per component:
+   `.vf-enter`   — fade + slide-up on mount. Used per-route in App.tsx, and on
+                   any single panel that should announce its own arrival.
+   `.vf-stagger` — the same entrance, staggered across up to 10 direct
+                   children, so a list or grid of cards reads as arriving
+                   together rather than popping in all at once.
+   Both ride the existing `vf-in` keyframe and `--vf-panel-dur`/`--vf-ease`
+   tokens already used by `.modal`/`.toast`/`.det`, and both go silent for
+   free under Reduce Motion, since that switch zeroes every animation
+   duration above rather than something these rules need to check. */
+.vf-enter { animation: vf-in var(--vf-panel-dur) var(--vf-ease) both; }
+.vf-stagger > * { animation: vf-in var(--vf-panel-dur) var(--vf-ease) both; }
+.vf-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.vf-stagger > *:nth-child(2) { animation-delay: 35ms; }
+.vf-stagger > *:nth-child(3) { animation-delay: 70ms; }
+.vf-stagger > *:nth-child(4) { animation-delay: 105ms; }
+.vf-stagger > *:nth-child(5) { animation-delay: 140ms; }
+.vf-stagger > *:nth-child(6) { animation-delay: 175ms; }
+.vf-stagger > *:nth-child(7) { animation-delay: 210ms; }
+.vf-stagger > *:nth-child(8) { animation-delay: 245ms; }
+.vf-stagger > *:nth-child(9) { animation-delay: 280ms; }
+.vf-stagger > *:nth-child(n+10) { animation-delay: 315ms; }
+
+/* Driven by the Reduce motion switch in Settings. Motion is ON by default for
+   every fresh session — this never gets seeded from the operating system, so
+   it only ever activates when someone turns it on in-app. */
 html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;

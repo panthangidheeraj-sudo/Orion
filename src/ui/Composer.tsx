@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Icon } from './Icon'
 import { Spinner } from './bits'
 import { useStore } from '../app/store'
@@ -87,6 +87,11 @@ export function Composer({
 
   useEffect(() => () => rec.current?.stop(), [])
 
+  /** Keep focus in the text field when a composer button is tapped. On a
+   * phone, a focus change closes the keyboard and reflows the page between
+   * touch-down and touch-up, and the tap then misses the button. */
+  const keepFocus = (e: ReactMouseEvent) => e.preventDefault()
+
   const send = () => {
     const t = value.trim()
     if (!t || busy) return
@@ -136,7 +141,7 @@ export function Composer({
         </div>
       )}
 
-      <label htmlFor="vf-composer" className="vf-sr">Ask VisionField Copilot</label>
+      <label htmlFor="vf-composer" className="vf-sr">Ask Orion</label>
       <textarea
         id="vf-composer"
         ref={ta}
@@ -159,6 +164,7 @@ export function Composer({
           />
           <button
             type="button" className="ibtn" aria-label="Add photo, capture or document"
+            onMouseDown={keepFocus}
             onClick={() => picker.current?.click()}
           >
             <Icon name="plus" size={17} width={2} />
@@ -178,13 +184,13 @@ export function Composer({
           ) : (
             <>
               <div className="modetoggle" role="group" aria-label="Conversation mode">
-                <button type="button" aria-pressed={mode === 'normal'} onClick={() => onMode('normal')}>
+                <button type="button" aria-label="Normal mode" aria-pressed={mode === 'normal'} onClick={() => onMode('normal')}>
                   <Icon name="chat" size={13} stroke={mode === 'normal' ? 'var(--vf-text)' : 'var(--vf-muted)'} width={1.8} />
-                  Normal
+                  <span className="mt-label">Normal</span>
                 </button>
-                <button type="button" aria-pressed={mode === 'live'} onClick={() => onMode('live')}>
+                <button type="button" aria-label="Live mode" aria-pressed={mode === 'live'} onClick={() => onMode('live')}>
                   <Icon name="cam" size={13} stroke={mode === 'live' ? 'var(--vf-text)' : 'var(--vf-muted)'} width={1.8} />
-                  Live
+                  <span className="mt-label">Live</span>
                 </button>
               </div>
               <button
@@ -192,11 +198,12 @@ export function Composer({
                 className={dictating ? 'ibtn rec' : 'ibtn'}
                 aria-label={dictating ? 'Stop voice input' : 'Voice input'}
                 aria-pressed={dictating}
+                onMouseDown={keepFocus}
                 onClick={toggleDictation}
               >
                 <Icon name="mic" size={16} />
               </button>
-              <button type="submit" className="ibtn key" aria-label="Send message" disabled={!value.trim()}>
+              <button type="submit" className="ibtn key" aria-label="Send message" disabled={!value.trim()} onMouseDown={keepFocus}>
                 <Icon name="arrowup" size={17} width={2.1} />
               </button>
             </>

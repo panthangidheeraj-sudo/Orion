@@ -1,4 +1,5 @@
-import { Icon } from './Icon'
+import { Icon, MoonMark } from './Icon'
+import GooeyNav, { type GooeyNavItem } from './GooeyNav'
 import { useStore } from '../app/store'
 import type { Route } from '../app/types'
 
@@ -17,38 +18,51 @@ function isCurrent(route: Route, active: Route) {
   return route === active
 }
 
-function items(stroke: (on: boolean) => string, iconSize: number, route: Route, go: (r: Route) => void) {
-  return NAV.map((n) => {
-    const on = isCurrent(n.route, route)
-    return (
-      <a
-        key={n.route}
-        href={`#${n.route}`}
-        className="navitem"
-        aria-current={on ? 'page' : undefined}
-        onClick={(e) => { e.preventDefault(); go(n.route) }}
-      >
-        <Icon name={n.icon} size={iconSize} stroke={stroke(on)} />
-        <span>{n.label}</span>
-      </a>
-    )
-  })
+function useNav(iconSize: number) {
+  const { route, go } = useStore()
+  const items: GooeyNavItem[] = NAV.map((n) => ({
+    label: n.label,
+    href: `#${n.route}`,
+    // currentColor, so the icon flips with the label when its item is active.
+    icon: <Icon name={n.icon} size={iconSize} stroke="currentColor" />,
+  }))
+  const activeIndex = NAV.findIndex((n) => isCurrent(n.route, route))
+  const onSelect = (i: number) => go(NAV[i].route)
+  return { items, activeIndex, onSelect }
 }
 
+/** Desktop / tablet: the centred pill under the logo. */
 export function TopBar() {
-  const { route, go } = useStore()
+  const nav = useNav(16)
   return (
-    <nav className="vf-nav" aria-label="Primary">
-      {items((on) => (on ? 'var(--vf-on-invert)' : 'var(--vf-muted)'), 16, route, go)}
-    </nav>
+    <div className="vf-nav">
+      <GooeyNav {...nav} variant="top" ariaLabel="Primary" />
+    </div>
   )
 }
 
-export function TabBar() {
-  const { route, go } = useStore()
+/** Orion's mark, pinned to the top-left corner of the app shell. Sits beside
+ * the centred nav pill rather than inside it, so the nav stays centred. */
+export function Logo() {
+  const { go } = useStore()
   return (
-    <nav className="tabbar" aria-label="Primary">
-      {items((on) => (on ? 'var(--vf-text)' : 'var(--vf-muted)'), 20, route, go)}
-    </nav>
+    <a
+      href="#home"
+      className="vf-logo"
+      aria-label="Orion — home"
+      onClick={(e) => { e.preventDefault(); go('home') }}
+    >
+      <MoonMark size={26} />
+    </a>
+  )
+}
+
+/** Phone: fixed to the bottom edge, above the safe area. */
+export function TabBar() {
+  const nav = useNav(20)
+  return (
+    <div className="tabbar">
+      <GooeyNav {...nav} variant="bottom" ariaLabel="Primary" particleDistances={[60, 8]} particleCount={12} />
+    </div>
   )
 }

@@ -44,8 +44,8 @@ export function Convo() {
             {conversations.length} stored on this device · nothing synced
           </span>
         </div>
-        <span style={{ flex: 1 }} />
-        <div className="search" style={{ width: 280, maxWidth: '100%' }}>
+        <span className="sheet-spacer" style={{ flex: 1 }} />
+        <div className="search" style={{ width: 280, maxWidth: '100%', flex: '0 1 280px' }}>
           <Icon name="search" size={16} stroke="var(--vf-muted)" width={1.8} />
           <input
             value={query} placeholder="Search conversations"

@@ -37,6 +37,11 @@ SUPPORTED_EXT = {
 }
 
 
+
+# Text is cheap to extract but not free; stop an untrusted PDF with tens of
+# thousands of pages from tying the server up.
+MAX_TEXT_PAGES = 1000
+
 @dataclass
 class Page:
     number: int
@@ -95,6 +100,8 @@ def _pdf(path: Path) -> Extraction:
         doc = pymupdf.open(str(path))
         pages = []
         for i, page in enumerate(doc, start=1):
+            if i > MAX_TEXT_PAGES:
+                break
             txt = (page.get_text("text") or "").strip()
             pages.append(Page(i, txt, len(txt), needs_ocr=len(txt) < 24))
         doc.close()
@@ -107,6 +114,8 @@ def _pdf(path: Path) -> Extraction:
         reader = PdfReader(str(path))
         pages = []
         for i, page in enumerate(reader.pages, start=1):
+            if i > MAX_TEXT_PAGES:
+                break
             txt = (page.extract_text() or "").strip()
             pages.append(Page(i, txt, len(txt), needs_ocr=len(txt) < 24))
         return _finish(Extraction("pdf", pages, engine="pypdf"))

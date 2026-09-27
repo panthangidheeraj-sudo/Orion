@@ -1,4 +1,4 @@
-/* VisionField Copilot — design tokens.
+/* Orion — design tokens.
    These values are the single source of truth and mirror the Design canvas exactly.
    There is no accent hue: action = --vf-invert fill with --vf-on-invert text. */
 :root {
@@ -75,11 +75,27 @@
   --vf-gutter: 64px;
   --vf-safe-top: env(safe-area-inset-top, 0px);
   --vf-safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Fixed phone tab bar. One set of numbers, used both to size/position the
+     bar and to reserve the space it covers, so the two can never drift.
+     Zero on desktop, where the nav sits in the normal flow at the top. */
+  --vf-tabbar-h: 0px;          /* outer height of the bar */
+  --vf-tabbar-gap: 0px;        /* distance from the bottom edge (above the safe area) */
+  --vf-nav-reserve: calc(24px + var(--vf-safe-bottom));
 }
 
 @media (max-width: 1023px) {
   :root { --vf-gutter: 32px; }
 }
 @media (max-width: 767px) {
+  :root {
+    --vf-gutter: 14px;
+    --vf-tabbar-h: 66px;       /* 56px items + 2×4px padding + 2×1px border */
+    --vf-tabbar-gap: 10px;
+    /* bar + its offset + the device inset + breathing room above the bar */
+    --vf-nav-reserve: calc(var(--vf-tabbar-h) + var(--vf-tabbar-gap) + var(--vf-safe-bottom) + 12px);
+  }
+}
+@media (max-width: 380px) {
   :root { --vf-gutter: 12px; }
 }

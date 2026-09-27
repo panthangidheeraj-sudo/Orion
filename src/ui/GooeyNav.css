@@ -1,0 +1,205 @@
+/* React Bits <GooeyNav /> — styles scoped to .gooey-nav-container and tuned
+   to Orion's monochrome tokens. The gooey look comes from blurring the
+   pill + particles and then crushing the blur with contrast(); the black
+   ::before box makes that crush work, and `lighten` hides it again.
+
+   Orion changes: the container is isolated, painted with the panel colour
+   and clipped, so the black crush box can never show as a dark rectangle
+   over the starfield, and particles stay inside the pill. */
+
+.gooey-nav-container {
+  --linear-ease: linear(
+    0, 0.068, 0.19 2.7%, 0.804 8.1%, 1.037, 1.199 13.2%, 1.245, 1.27 15.8%, 1.274,
+    1.272 17.4%, 1.249 19.1%, 0.996 28%, 0.949, 0.928 33.3%, 0.926, 0.933 36.8%,
+    1.001 45.6%, 1.013, 1.019 50.8%, 1.018 54.4%, 1 63.1%, 0.995 68%, 1.001 85%, 1
+  );
+  /* Particle palette: Orion has no accent hue, so the burst is white/grey. */
+  --color-1: #ffffff;
+  --color-2: #c4c8ce;
+  --color-3: #8e939b;
+  --color-4: #f2f3f4;
+  --gn-radius: 10px;
+
+  position: relative;
+  width: 100%;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--gn-radius);
+  background: var(--vf-panel);
+}
+
+.gooey-nav-container nav {
+  display: flex;
+  position: relative;
+  /* Above the effect layer: `transform` makes the nav its own stacking
+     context, so without this the white effect pill (z-index 1) would paint
+     over the active label. The gooey blob and particles show around it. */
+  z-index: 2;
+  width: 100%;
+  transform: translate3d(0, 0, 0.01px);
+}
+
+.gooey-nav-container nav ul {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  position: relative;
+  z-index: 3;
+  color: var(--vf-text-2);
+}
+
+.gooey-nav-container nav ul li {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: var(--gn-radius);
+  position: relative;
+  cursor: pointer;
+  color: var(--vf-text-2);
+  transition: color 0.3s ease, background-color var(--vf-instant) var(--vf-ease);
+}
+
+.gooey-nav-container nav ul li a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 12px;
+  color: inherit;
+  border-radius: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.gooey-nav-container .gn-label { overflow: hidden; text-overflow: ellipsis; }
+
+@media (hover: hover) {
+  .gooey-nav-container nav ul li:not(.active):hover { background: var(--vf-track); color: var(--vf-text); }
+}
+
+.gooey-nav-container nav ul li::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--gn-radius);
+  background: var(--vf-invert);
+  opacity: 0;
+  transform: scale(0);
+  transition: all 0.3s ease;
+  z-index: -1;
+}
+
+.gooey-nav-container nav ul li.active { color: var(--vf-on-invert); }
+.gooey-nav-container nav ul li.active a { font-weight: 600; }
+.gooey-nav-container nav ul li.active::after { opacity: 1; transform: scale(1); }
+
+.gooey-nav-container .effect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+}
+
+.gooey-nav-container .effect.filter {
+  filter: blur(7px) contrast(100) blur(0);
+  mix-blend-mode: lighten;
+}
+
+.gooey-nav-container .effect.filter::before {
+  content: '';
+  position: absolute;
+  inset: -75px;
+  z-index: -2;
+  background: black;
+}
+
+.gooey-nav-container .effect.filter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: white;
+  transform: scale(0);
+  opacity: 0;
+  z-index: -1;
+  border-radius: var(--gn-radius);
+}
+
+.gooey-nav-container .effect.active::after { animation: gn-pill 0.3s ease both; }
+
+@keyframes gn-pill {
+  to { transform: scale(1); opacity: 1; }
+}
+
+.gooey-nav-container .gn-particle,
+.gooey-nav-container .gn-point {
+  display: block;
+  opacity: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 100%;
+  transform-origin: center;
+}
+
+.gooey-nav-container .gn-particle {
+  --time: 5s;
+  position: absolute;
+  top: calc(50% - 8px);
+  left: calc(50% - 8px);
+  animation: gn-particle calc(var(--time)) ease 1 -350ms;
+}
+
+.gooey-nav-container .gn-point {
+  background: var(--color);
+  opacity: 1;
+  animation: gn-point calc(var(--time)) ease 1 -350ms;
+}
+
+@keyframes gn-particle {
+  0% {
+    transform: rotate(0deg) translate(calc(var(--start-x)), calc(var(--start-y)));
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  70% {
+    transform: rotate(calc(var(--rotate) * 0.5)) translate(calc(var(--end-x) * 1.2), calc(var(--end-y) * 1.2));
+    opacity: 1;
+    animation-timing-function: ease;
+  }
+  85% {
+    transform: rotate(calc(var(--rotate) * 0.66)) translate(calc(var(--end-x)), calc(var(--end-y)));
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(calc(var(--rotate) * 1.2)) translate(calc(var(--end-x) * 0.5), calc(var(--end-y) * 0.5));
+    opacity: 1;
+  }
+}
+
+@keyframes gn-point {
+  0% { transform: scale(0); opacity: 0; animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  25% { transform: scale(calc(var(--scale) * 0.25)); }
+  38% { opacity: 1; }
+  65% { transform: scale(var(--scale)); opacity: 1; animation-timing-function: ease; }
+  85% { transform: scale(var(--scale)); opacity: 1; }
+  100% { transform: scale(0); opacity: 0; }
+}
+
+/* ---------------------------------------------------------- phone tab bar */
+.gooey-nav-container.gn-bottom { --gn-radius: 14px; }
+.gooey-nav-container.gn-bottom nav ul { gap: 4px; }
+.gooey-nav-container.gn-bottom nav ul li a {
+  flex-direction: column;
+  gap: 4px;
+  height: 56px;
+  padding: 0 4px;
+  font-size: 10.5px;
+}

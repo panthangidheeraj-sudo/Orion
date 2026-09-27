@@ -15,7 +15,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from app.agent.live_session import sessions
 from app.agent.orchestrator import orchestrator
 from app.agent.tool_registry import registry as tool_registry
-from app.api._media import read_upload, store_image
+from app.api._media import MAX_IMAGE_BYTES, read_upload, store_image
 from app.config import settings
 from app.logging_setup import get_logger
 from app.memory import memory_service as M
@@ -61,7 +61,7 @@ async def frame(session_id: str = Form(...),
     if target_label:
         state.target_label = target_label
 
-    data = await read_upload(file, limit=25 * 1024 * 1024)
+    data = await read_upload(file, limit=MAX_IMAGE_BYTES)
     stored = store_image(data, source="live_frame", conversation_id=state.conversation_id,
                          inspection_id=state.inspection_id)
     ref = resolve_image(stored["image_id"])

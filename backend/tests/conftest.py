@@ -24,7 +24,14 @@ def isolated_data(tmp_path, monkeypatch):
     from app.memory import vector_store as vs
     from app.models.registry import registry as models
 
+    from app.security import limiter
+
     monkeypatch.setattr(settings, "data_dir", tmp_path, raising=False)
+    # Security tests switch these on explicitly; everything else runs open.
+    monkeypatch.setattr(settings, "access_token", "", raising=False)
+    monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
+    monkeypatch.setattr(settings, "heavy_rate_limit_per_minute", 0, raising=False)
+    limiter.hits.clear()
     settings.ensure_dirs()
     db.reset_connections()
     db.init_db()

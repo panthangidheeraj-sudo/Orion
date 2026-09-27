@@ -22,7 +22,11 @@ BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8756").rstrip("/
 GREEN, RED, YELLOW, DIM, BOLD, RESET = (
     "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[1m", "\033[0m")
 
-client = httpx.Client(base_url=BASE, timeout=90.0)
+# A deployed backend needs its access key: VF_ACCESS_TOKEN=... python scripts/verify_all.py URL
+import os as _os
+_key = _os.environ.get("VF_ACCESS_TOKEN", "")
+client = httpx.Client(base_url=BASE, timeout=90.0,
+                      headers={"X-Orion-Key": _key} if _key else None)
 results: List[Tuple[str, str, bool, str]] = []
 state: Dict[str, Any] = {}
 
@@ -560,7 +564,7 @@ def _capability_answer_is_grounded():
 def _identity_answer_is_honest():
     r = client.post("/api/chat", json={"message": "are you chatgpt?"}).json()
     text = r["text"].lower()
-    assert "visionfield" in text
+    assert "orion" in text
     if r["model"]["synthetic"]:
         assert "stand-in" in text and "not a language model" in text, r["text"]
     return "names the actual engine"

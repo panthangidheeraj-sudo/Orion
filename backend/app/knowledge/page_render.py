@@ -18,8 +18,9 @@ log = get_logger(__name__)
 
 
 def render_pdf_pages(pdf_path: Path, out_dir: Path, dpi: Optional[int] = None,
-                     max_pages: int = 400) -> List[Dict[str, Any]]:
+                     max_pages: Optional[int] = None) -> List[Dict[str, Any]]:
     dpi = dpi or settings.page_render_dpi
+    max_pages = max_pages or settings.max_pdf_pages
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         import pymupdf  # type: ignore
@@ -36,7 +37,14 @@ def render_pdf_pages(pdf_path: Path, out_dir: Path, dpi: Optional[int] = None,
             if i > max_pages:
                 log.info("stopped rendering at %d pages", max_pages)
                 break
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            # A PDF can declare an enormous page; scale that page down so its
+            # bitmap stays under the same pixel ceiling as uploaded images.
+            page_matrix = matrix
+            w, h = page.rect.width * zoom, page.rect.height * zoom
+            if w * h > settings.max_image_pixels:
+                shrink = (settings.max_image_pixels / (w * h)) ** 0.5
+                page_matrix = pymupdf.Matrix(zoom * shrink, zoom * shrink)
+            pix = page.get_pixmap(matrix=page_matrix, alpha=False)
             dest = out_dir / f"{i:03d}.png"
             pix.save(str(dest))
             rendered.append({"page_number": i, "image_path": str(dest),
@@ -49,6 +57,8 @@ def render_pdf_pages(pdf_path: Path, out_dir: Path, dpi: Optional[int] = None,
 def copy_image_page(src: Path, out_dir: Path) -> List[Dict[str, Any]]:
     """An uploaded picture is a one-page visual document."""
     from PIL import Image
+
+    import app.models._imaging  # noqa: F401  (installs the decompression-bomb guard)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / "001.png"

@@ -2,19 +2,21 @@
 #
 # Core service. These are all that is needed for the backend to start, ingest
 # documents, run the agent loop and serve the API.
-fastapi>=0.115
-uvicorn[standard]>=0.30
+fastapi>=0.120
+starlette>=1.3.1         # request-parsing and file-serving DoS advisories in earlier releases
+h11>=0.16                # request smuggling fix (CVE-2025-43859)
+uvicorn[standard]>=0.34
 pydantic>=2.7
 pydantic-settings>=2.3
-python-multipart>=0.0.9
-httpx>=0.27
+python-multipart>=0.0.31   # earlier releases: several upload-parsing DoS advisories
+httpx>=0.28
 numpy>=1.26
-pillow>=10.3
+pillow>=12.3.0          # earlier releases: image-decoding advisories (untrusted uploads)
 psutil>=5.9            # §23 CPU and memory figures; degrades honestly without it
 
 # Document "eyes" (§11). PyMuPDF does both text extraction and page rendering.
 pymupdf>=1.24
-pypdf>=4.2            # fallback text extraction if PyMuPDF is unavailable
+pypdf>=6.16.1            # fallback text extraction if PyMuPDF is unavailable
 python-docx>=1.1      # DOCX support
 
 # Tests
