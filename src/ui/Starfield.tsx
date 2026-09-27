@@ -3,6 +3,18 @@ import { useEffect, useRef } from 'react'
 interface Star { a: number; r: number; v: number; s: number; t: string; o: number }
 
 /**
+ * Live controls a screen can nudge (the About page's ending uses them).
+ * `speed` scales the inward drift, `density` is the share of stars drawn.
+ * The canvas eases toward these targets, so a change never jolts the field.
+ * Defaults leave the starfield exactly as it has always been.
+ */
+export const starTuning = { speed: 1, density: 1 }
+export function resetStarTuning() {
+  starTuning.speed = 1
+  starTuning.density = 1
+}
+
+/**
  * The signature background: sparse round points travelling from the outer
  * edges toward a central vanishing point, growing and brightening slightly as
  * they close in, fading out at the centre, then respawning at the rim.
@@ -31,6 +43,8 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
     let raf = 0
     let last = 0
     let dpr = 1
+    let speed = starTuning.speed
+    let density = starTuning.density
     // Snapping to the device pixel grid is what keeps a one-pixel star a hard
     // point of light instead of an anti-aliased smudge.
     const snap = (v: number) => Math.round(v * dpr) / dpr
@@ -72,8 +86,16 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
     const frame = (dt: number) => {
       ctx.clearRect(0, 0, w, h)
       const px = 1 / dpr
-      for (const s of stars) {
-        if (dt) s.r -= s.v * dt
+      if (dt) {
+        const k = 1 - Math.pow(0.04, dt)
+        speed += (starTuning.speed - speed) * k
+        density += (starTuning.density - density) * k
+      }
+      const shown = Math.round(stars.length * Math.max(0, Math.min(1, density)))
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i]
+        if (dt) s.r -= s.v * dt * speed
+        if (i >= shown) { if (s.r < R * 0.05) place(s, false); continue }
         if (s.r < R * 0.05) place(s, false)
         const q = s.r / R
         const x = cx + Math.cos(s.a) * s.r

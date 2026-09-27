@@ -108,6 +108,15 @@ export default function TextPressure({
    * ever shrinks between resizes, so the heading can't pulse. */
   const fitRef = useRef(1)
 
+  /** Set the heading size directly, and size the (layout-contained) box to
+   * match, so a size change never has to wait for a React render. */
+  const applyFont = useCallback((px: number) => {
+    const t = titleRef.current
+    const c = containerRef.current
+    if (t) t.style.fontSize = `${px}px`
+    if (c && !scale) c.style.height = `${px}px`
+  }, [scale])
+
   const [fontSize, setFontSize] = useState(minFontSize)
   const fontSizeRef = useRef(minFontSize)
   fontSizeRef.current = fontSize
@@ -159,9 +168,9 @@ export default function TextPressure({
     const need = t.scrollWidth
     if (avail > 0 && need > avail + 0.5) {
       fitRef.current = Math.max(0.3, fitRef.current * (avail / need) * 0.98)
-      t.style.fontSize = `${fontSizeRef.current * fitRef.current}px`
+      applyFont(fontSizeRef.current * fitRef.current)
     }
-  }, [])
+  }, [applyFont])
 
   const setSize = useCallback(() => {
     const container = containerRef.current
@@ -178,7 +187,7 @@ export default function TextPressure({
     fontSizeRef.current = next
     // Set directly too: if `next` equals the current state React skips the
     // re-render, and the fitted size from before would otherwise stick.
-    title.style.fontSize = `${next}px`
+    applyFont(next)
     setFontSize(next)
     setScaleY(1)
     setLineHeight(1)
@@ -195,7 +204,7 @@ export default function TextPressure({
         setLineHeight(yRatio)
       }
     })
-  }, [chars.length, minFontSize, maxFontSize, scale, fitToWidth])
+  }, [chars.length, minFontSize, maxFontSize, scale, fitToWidth, applyFont])
 
   useEffect(() => {
     const debouncedSetSize = debounce(setSize, 100)
@@ -217,42 +226,75 @@ export default function TextPressure({
     }
 
     let rafId = 0
-    const animate = () => {
+    let last = 0
+    const animate = (ts: number) => {
+      rafId = requestAnimationFrame(animate)
       const m = mouseRef.current
       const c = cursorRef.current
-      m.x += (c.x - m.x) / 15
-      m.y += (c.y - m.y) / 15
+      // Frame-rate independent easing. The upstream `/15` per frame lagged
+      // badly whenever a frame ran long; this closes ~22% of the gap per
+      // 16.7ms regardless of how long the frame actually took.
+      const dt = last ? Math.min(64, ts - last) : 16.7
+      last = ts
+      const k = 1 - Math.pow(1 - 0.22, dt / 16.7)
+      m.x += (c.x - m.x) * k
+      m.y += (c.y - m.y) * k
       const settling = Math.abs(c.x - m.x) > 0.3 || Math.abs(c.y - m.y) > 0.3
 
-      if (titleRef.current && (settling || dirtyRef.current)) {
-        dirtyRef.current = false
-        const titleRect = titleRef.current.getBoundingClientRect()
-        const maxDist = Math.max(1, titleRect.width / 2)
+      const title = titleRef.current
+      const container = containerRef.current
+      if (!title || !container || !(settling || dirtyRef.current)) return
+      dirtyRef.current = false
 
-        spansRef.current.forEach((span) => {
-          if (!span) return
-          const rect = span.getBoundingClientRect()
-          const charCenter = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-          const d = dist(m, charCenter)
+      // READ everything first, then WRITE. Measuring a span straight after
+      // changing the previous span's width axis forces a full layout per
+      // letter — that per-letter reflow is what made the heading lag.
+      // Batched, the browser lays the text out once per frame.
+      const spans = spansRef.current
+      const titleRect = title.getBoundingClientRect()
+      const availW = container.clientWidth
+      let contentW = 0
+      const centers = spans.map((span) => {
+        if (!span) return null
+        const r = span.getBoundingClientRect()
+        contentW += r.width
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      })
 
-          const wdth = width ? Math.floor(getAttr(d, maxDist, 5, 200)) : 100
-          const wght = weight ? Math.floor(getAttr(d, maxDist, 100, 900)) : 400
-          const italVal = italic ? getAttr(d, maxDist, 0, 1).toFixed(2) : '0'
-          const alphaVal = alpha ? getAttr(d, maxDist, 0, 1).toFixed(2) : '1'
-
-          const settings = `'wght' ${wght}, 'wdth' ${wdth}, 'ital' ${italVal}`
-          if (span.style.fontVariationSettings !== settings) span.style.fontVariationSettings = settings
-          if (alpha && span.style.opacity !== alphaVal) span.style.opacity = alphaVal
-        })
-        fitToWidth()
+      const maxDist = Math.max(1, titleRect.width / 2)
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]
+        const ctr = centers[i]
+        if (!span || !ctr) continue
+        const d = dist(m, ctr)
+        // Quantised axis values. Every distinct (wght, wdth) pair makes the
+        // browser build a new instance of the variable font — ~30ms each on a
+        // mid-range laptop, which is what made the heading trail the pointer.
+        // On a small fixed grid the instances are built once and then reused
+        // from cache (~2ms a frame); at these sizes the steps are invisible.
+        const wdth = width ? Math.min(200, 5 + Math.round((getAttr(d, maxDist, 5, 200) - 5) / 8) * 8) : 100
+        const wght = weight ? Math.min(900, 100 + Math.round((getAttr(d, maxDist, 100, 900) - 100) / 25) * 25) : 400
+        const italVal = italic ? (Math.round(getAttr(d, maxDist, 0, 1) * 10) / 10).toFixed(1) : '0'
+        const settings = `'wght' ${wght}, 'wdth' ${wdth}, 'ital' ${italVal}`
+        if (span.style.fontVariationSettings !== settings) span.style.fontVariationSettings = settings
+        if (alpha) {
+          const alphaVal = getAttr(d, maxDist, 0, 1).toFixed(2)
+          if (span.style.opacity !== alphaVal) span.style.opacity = alphaVal
+        }
       }
 
-      rafId = requestAnimationFrame(animate)
+      // Fit check from the measurement already taken — no extra layout.
+      // (The title box is always 100% wide; the letters' own widths are what
+      // can overflow it.)
+      if (availW > 0 && contentW > availW + 0.5) {
+        fitRef.current = Math.max(0.3, fitRef.current * (availW / contentW) * 0.98)
+        applyFont(fontSizeRef.current * fitRef.current)
+      }
     }
 
-    animate()
+    rafId = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(rafId)
-  }, [width, weight, italic, alpha, fitToWidth])
+  }, [width, weight, italic, alpha, fitToWidth, applyFont])
 
   const styleElement = useMemo(
     () => (
@@ -278,7 +320,15 @@ export default function TextPressure({
     <div
       ref={containerRef}
       className="text-pressure"
-      style={{ position: 'relative', width: '100%', height: '100%', background: 'transparent', ...style }}
+      style={{
+        position: 'relative', width: '100%', background: 'transparent',
+        // The letters change width every frame. Containing layout (with an
+        // explicit height = one line) makes this box a layout root, so each
+        // frame re-lays out one line of text instead of the whole page.
+        height: scale ? '100%' : fontSize * fitRef.current,
+        contain: scale ? undefined : 'layout size style',
+        ...style,
+      }}
     >
       {styleElement}
       <Tag

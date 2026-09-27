@@ -62,17 +62,23 @@ input, textarea { font: inherit; color: inherit; }
 /* Pinned to the corner independently of the centred nav pill below, so the
    nav's own centring is unaffected by the logo's width. */
 .vf-logo {
-  position: absolute; top: calc(20px + var(--vf-safe-top)); left: var(--vf-gutter);
-  z-index: 2; display: flex; align-items: center; flex: none;
-  border-radius: 8px; padding: 2px;
-  transition: opacity var(--vf-instant) var(--vf-ease);
+  position: absolute; top: calc(22px + var(--vf-safe-top)); left: var(--vf-gutter);
+  z-index: 2; display: flex; align-items: center; justify-content: center; flex: none;
+  /* Vertically centred on the 48px nav pill beside it. */
+  margin-top: -4px;
+  background: none; border: 0; padding: 4px; border-radius: 50%; cursor: pointer;
+  transition: opacity var(--vf-instant) var(--vf-ease), transform var(--vf-quick) var(--vf-ease),
+    filter var(--vf-quick) var(--vf-ease);
 }
-.vf-logo:hover { opacity: 0.82; }
+.vf-logo:hover { transform: rotate(-14deg) scale(1.05); filter: drop-shadow(0 0 10px rgba(255,255,255,0.22)); }
+.vf-logo:active { transform: rotate(-14deg) scale(0.96); }
+.vf-logo.is-refreshing { animation: vf-logo-turn 420ms var(--vf-ease) both; }
+@keyframes vf-logo-turn { from { transform: rotate(0); } to { transform: rotate(-360deg); opacity: 0.6; } }
 /* The centred pill. Its width leaves room for the corner logo on both sides,
    so the two can never overlap on a tablet-width window. The items and the
    gooey active-pill come from GooeyNav (ui/GooeyNav.css). */
 .vf-nav {
-  align-self: center; width: min(680px, calc(100% - 96px)); height: 48px; flex: none;
+  align-self: center; width: min(680px, calc(100% - 136px)); height: 48px; flex: none;
   display: flex; align-items: center; padding: 4px;
   background: var(--vf-panel); border: 1px solid var(--vf-border);
   border-radius: 14px; box-shadow: var(--vf-e3);
@@ -688,7 +694,8 @@ input, textarea { font: inherit; color: inherit; }
   .vf-frame { padding: calc(10px + var(--vf-safe-top)) var(--vf-gutter) calc(14px + var(--vf-safe-bottom)); }
   .vf-frame.has-tabbar { padding-bottom: var(--vf-nav-reserve); }
   .vf-frame.chat-frame { padding-left: var(--vf-gutter); padding-right: var(--vf-gutter); }
-  .vf-logo { position: static; align-self: flex-start; margin: 0 0 8px -2px; padding: 4px; }
+  .vf-logo { position: static; align-self: flex-start; margin: 0 0 6px -4px; padding: 4px; }
+  .vf-logo img { width: 36px; height: 36px; }
   .vf-nav { display: none; }
 
   .tabbar {

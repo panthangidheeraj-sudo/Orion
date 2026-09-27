@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Icon, MoonMark } from './Icon'
 import GooeyNav, { type GooeyNavItem } from './GooeyNav'
 import { useStore } from '../app/store'
@@ -42,18 +43,28 @@ export function TopBar() {
 }
 
 /** Orion's mark, pinned to the top-left corner of the app shell. Sits beside
- * the centred nav pill rather than inside it, so the nav stays centred. */
+ * the centred nav pill rather than inside it, so the nav stays centred.
+ * Clicking it refreshes the app: the mark turns once, then the page reloads
+ * (straight away under Reduce Motion). */
 export function Logo() {
-  const { go } = useStore()
+  const { prefs } = useStore()
+  const [spinning, setSpinning] = useState(false)
+  const refresh = () => {
+    if (spinning) return
+    if (prefs.reduceMotion) { window.location.reload(); return }
+    setSpinning(true)
+    window.setTimeout(() => window.location.reload(), 420)
+  }
   return (
-    <a
-      href="#home"
-      className="vf-logo"
-      aria-label="Orion — home"
-      onClick={(e) => { e.preventDefault(); go('home') }}
+    <button
+      type="button"
+      className={spinning ? 'vf-logo is-refreshing' : 'vf-logo'}
+      aria-label="Refresh Orion"
+      title="Refresh"
+      onClick={refresh}
     >
-      <MoonMark size={26} />
-    </a>
+      <MoonMark size={44} />
+    </button>
   )
 }
 
