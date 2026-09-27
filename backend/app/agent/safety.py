@@ -81,6 +81,53 @@ MEASUREMENT = re.compile(
     r"(?<![\w.])(\d{1,5}(?:\.\d+)?)\s?(°\s?[CF]|degrees?\s?[CF]?|V(?:AC|DC)?|A\b|mA\b|"
     r"k?Ω|ohms?\b|Hz\b|rpm\b|bar\b|psi\b|kW\b|mm/s\b|dB\b)", re.I)
 
+# ------------------------------------------------------------ input gate
+#
+# The one deliberately deterministic check on what the *technician* says. It
+# runs before the router and before any model, and it does not depend on a
+# model being available: if someone reports sparks, smoke or an exposed live
+# conductor, Orion leads with getting safe — every time, whatever else is
+# going on. It is not an intent classifier; it only ever ADDS a safety-first
+# preface. Ordinary routing is the reasoning model's job (app/agent/router.py).
+IMMEDIATE_DANGER = [
+    ("arcing", re.compile(r"\b(spark\w*|arc(?:ing|ed|s)?\b|flash\s*over|flashing)\b", re.I)),
+    ("smoke_fire", re.compile(r"\b(smok\w*|fire(?!\s*(?:alarm|extinguisher|door|drill|exit|rated|proof))|flames?|on\s+fire|burning|burnt|scorch\w*|"
+                              r"melt\w*)\b", re.I)),
+    ("exposed_live", re.compile(r"\b(exposed|bare|stripped|damaged)\s+(live\s+)?(wires?|"
+                                r"conductors?|cables?|terminals?|busbars?)\b|"
+                                r"\b(live|energi[sz]ed)\s+(wires?|conductors?|parts?|terminals?)\b",
+                                re.I)),
+    ("shock", re.compile(r"\b(got|getting|gave me|giving)\s+(a\s+)?(shock|zap)\w*|"
+                         r"\belectrocut\w*|\btingl\w+\s+(?:from|when)", re.I)),
+]
+
+IMMEDIATE_STEPS = [
+    "Keep clear and don't touch the equipment or anything metal connected to it.",
+    "If it's safe to reach, switch off and isolate the supply upstream — at the "
+    "breaker or isolator, not at the machine's own controls.",
+    "If there are flames or smoke you can't stop by isolating, leave the area, "
+    "raise the alarm and use only an extinguisher rated for electrical fires (CO₂).",
+    "Treat everything as live until it has been isolated, locked off and proven dead.",
+]
+
+
+def input_gate(text: str) -> Optional[Dict[str, Any]]:
+    """Return a safety-first notice when the technician reports an active hazard."""
+    hits = [key for key, rx in IMMEDIATE_DANGER if rx.search(text or "")]
+    if not hits:
+        return None
+    return {"level": "safety", "title": "Get safe first", "items": IMMEDIATE_STEPS,
+            "note": None, "hazards": hits, "source": "safety_gate"}
+
+
+GENERIC_CAUTION = {
+    "level": "safety", "title": "Before you touch it",
+    "items": ["Isolate and lock off the supply, and prove it dead, before any hands-on "
+              "check. Let moving parts stop and hot parts cool."],
+    "note": None, "hazards": ["model_flagged"], "source": "router",
+}
+
+
 PROFESSIONAL_NOTE = (
     "This is general troubleshooting guidance, not an authorised procedure for this "
     "specific machine. Follow the manufacturer's manual and your site's permit and "

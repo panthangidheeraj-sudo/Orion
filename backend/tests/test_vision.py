@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def test_photo_analyze_stores_the_image_and_answers(client, photo_bytes):
+def test_photo_analyze_stores_the_image_and_answers(client, photo_bytes, llm):
     body = client.post("/api/photo/analyze", files={
         "file": ("frame.jpg", photo_bytes, "image/jpeg")},
         data={"question": "What am I looking at and what should I check?"}).json()

@@ -31,6 +31,9 @@ def isolated_data(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "access_token", "", raising=False)
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
     monkeypatch.setattr(settings, "heavy_rate_limit_per_minute", 0, raising=False)
+    # Never pick up a model server running on the developer's machine (Ollama
+    # on :11434): tests that need a model install the scripted double.
+    monkeypatch.setattr(settings, "local_llm_url", "http://127.0.0.1:9/v1", raising=False)
     limiter.hits.clear()
     settings.ensure_dirs()
     db.reset_connections()
@@ -116,3 +119,14 @@ def second_frame() -> bytes:
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=92)
     return buf.getvalue()
+
+
+@pytest.fixture
+def llm(isolated_data):
+    """Install the scripted model double as the reasoning provider (tests only)."""
+    from app.models.registry import registry as models
+    from tests.llm_double import ScriptedLLM
+
+    double = ScriptedLLM()
+    models._chosen["reasoning"] = double
+    return double

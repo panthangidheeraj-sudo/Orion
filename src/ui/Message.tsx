@@ -32,7 +32,7 @@ const SECTION_META: Record<Section['kind'], { label: string; icon: string; colou
 
 const NOTICE_META = {
   safety: { kind: 'Safety', icon: 'shield', colour: 'var(--vf-warn)' },
-  need: { kind: 'More information needed', icon: 'info', colour: 'var(--vf-text)' },
+  need: { kind: 'To confirm', icon: 'info', colour: 'var(--vf-text)' },
   confirmed: { kind: 'Confirmed finding', icon: 'check', colour: 'var(--vf-ok)' },
   error: { kind: 'Could not complete', icon: 'warn', colour: 'var(--vf-danger)' },
 } as const
@@ -90,10 +90,13 @@ export function AssistantMessage({
   const { prefs, peekFreshMessage, consumeFreshMessage } = useStore()
   const notice = msg.notice
   const nm = notice ? NOTICE_META[notice.level] : null
-  // An ordinary conversational turn: prose, and none of the diagnostic
-  // furniture. Recognised by shape so it needs no extra field on the wire.
-  const isChat = Boolean(msg.text) && !msg.sections?.length && !notice
-    && !msg.refs?.length && !msg.evidence?.length
+  // The backend's router decided what kind of turn this is; the client only
+  // renders it. Anything that isn't a diagnosis is plain prose — and when the
+  // safety gate raised a notice, that notice comes first.
+  const isChat = msg.kind
+    ? msg.kind !== 'diagnosis'
+    : Boolean(msg.text) && !msg.sections?.length && !notice && !msg.refs?.length && !msg.evidence?.length
+  const noticeFirst = Boolean(notice) && (isChat || Boolean(notice?.first))
 
   // The reveal plan: text and section prose broken into words (so they type
   // in), everything else counted as a single unit that appears whole once
@@ -150,11 +153,12 @@ export function AssistantMessage({
   }
 
   const memoryShown = msg.memory ? takeBlock() : false
+  const firstNoticeShown = noticeFirst && plan.hasNotice ? takeBlock() : false
   const textReveal = takeWords(plan.textWords)
   const sectionReveals = plan.sectionWords.map((chunks) => takeWords(chunks))
   const evidenceShown = plan.hasEvidence ? takeBlock() : false
   const confidenceShown = plan.hasConfidence ? takeBlock() : false
-  const noticeShown = plan.hasNotice ? takeBlock() : false
+  const noticeShown = !noticeFirst && plan.hasNotice ? takeBlock() : false
   const footerShown = plan.hasFooter ? takeBlock() : false
 
   return (
@@ -176,11 +180,30 @@ export function AssistantMessage({
         </div>
       )}
 
+      {notice && nm && noticeFirst && firstNoticeShown && (
+        <div className={`notice ${notice.level}`} style={{ marginBottom: 10 }}>
+          <Icon name={nm.icon} size={19} stroke={nm.colour} width={1.8} />
+          <div>
+            <Cap style={{ color: nm.colour }}>{nm.kind}</Cap>
+            <div className="title">{notice.title}</div>
+            {notice.text && <div className="text">{notice.text}</div>}
+          </div>
+        </div>
+      )}
+
       {/* Plain prose. The type has always allowed `text`; before this it was
           only ever rendered for the user's own turn, so a conversational reply
           from the assistant came out as an empty card. */}
       {msg.text && (textReveal.text || done) && (
         <Prose text={textReveal.text} chat={isChat} cursor={textReveal.active ? REVEAL_CURSOR : undefined} />
+      )}
+
+      {(msg.kind === 'fallback' || msg.kind === 'offline') && done && (
+        <Cap style={{ display: 'block', marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+          {msg.kind === 'fallback'
+            ? 'No reasoning model is running, so Orion can’t interpret messages yet.'
+            : 'The Orion engine is offline.'}
+        </Cap>
       )}
 
       <div className="sections vf-stagger">
@@ -257,6 +280,20 @@ export function AssistantMessage({
 }
 
 export function WorkTrail({ steps, index }: { steps: Step[]; index: number }) {
+  // Until the backend reports a real tool step, nothing technical is known to
+  // be happening — so it's a quiet typing indicator, not a work trail. Only a
+  // technical turn ever streams steps.
+  const realSteps = steps.filter((s) => s.label !== 'Thinking')
+  if (!realSteps.length) {
+    return (
+      <div className="activity vf-enter" role="status" aria-label="Orion is replying">
+        <AiMark size={26} />
+        <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+      </div>
+    )
+  }
+  steps = realSteps
+  index = Math.min(index, steps.length)
   return (
     <article className="answer vf-enter">
       <div className="answer-head">

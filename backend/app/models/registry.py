@@ -23,7 +23,6 @@ from app.models.base import (
 )
 from app.models.classification import EfficientNetOnnxClassifier
 from app.models.embeddings import LexicalHashEmbedder, NomicOnnxEmbedder
-from app.models.heuristic import HeuristicReasoningProvider
 from app.models.ocr import EasyOCRProvider, TrOCROnnxProvider
 from app.models.qwen_vl import LocalOpenAICompatProvider, QwenVLGenAIProvider
 from app.models.runtime import asset_inventory, runtime_info
@@ -40,12 +39,13 @@ Candidate = tuple  # (name, factory)
 
 def _candidates() -> Dict[str, List[Candidate]]:
     """Ordered candidates per role. Highest capability first, honest last."""
+    # Real language models only. There is deliberately no rule-based stand-in:
+    # with no model running, Orion says it can't interpret requests rather than
+    # pretending to (app/agent/router.py).
     reasoning: List[Candidate] = [
         ("onnxruntime-genai", QwenVLGenAIProvider),
         ("local-openai-compat", LocalOpenAICompatProvider),
     ]
-    if settings.allow_heuristic_reasoning:
-        reasoning.append(("heuristic-offline", HeuristicReasoningProvider))
 
     return {
         "reasoning": reasoning,
@@ -105,6 +105,7 @@ class ModelRegistry:
         self._lock = threading.Lock()
         self._chosen: Dict[str, Adapter] = {}
         self._attempts: Dict[str, List[Dict[str, Any]]] = {}
+        self._probed_at: Dict[str, float] = {}
 
     # ------------------------------------------------------------- selection
     def _select(self, role: str) -> Adapter:
@@ -137,6 +138,21 @@ class ModelRegistry:
             if role not in self._chosen:
                 self._chosen[role] = self._select(role)
             return self._chosen[role]
+
+    def refresh_if_unavailable(self, role: str, min_interval_s: float = 20.0) -> None:
+        """Re-probe a role that has no working adapter, so a local model server
+        started after the backend is picked up without a restart."""
+        import time
+
+        with self._lock:
+            adapter = self._chosen.get(role)
+            if adapter is None or adapter.health().status == base.READY:
+                return
+            now = time.monotonic()
+            if now - self._probed_at.get(role, 0.0) < min_interval_s:
+                return
+            self._probed_at[role] = now
+            self._chosen.pop(role, None)
 
     def reload(self) -> None:
         with self._lock:
@@ -174,6 +190,8 @@ class ModelRegistry:
 
     # ------------------------------------------------------------- reporting
     def status(self) -> Dict[str, Any]:
+        # A local model server may have come up since the last probe.
+        self.refresh_if_unavailable("reasoning")
         roles: Dict[str, Any] = {}
         for role in PREFERENCE:
             adapter = self.get(role)

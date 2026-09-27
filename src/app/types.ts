@@ -28,16 +28,35 @@ export type SectionKind = 'observed' | 'inferred' | 'next' | 'measure' | 'ref'
 export interface Section { kind: SectionKind; text: string }
 
 export type NoticeLevel = 'safety' | 'need' | 'confirmed' | 'error'
-export interface NoticeBlock { level: NoticeLevel; title: string; text: string }
+export interface NoticeBlock {
+  level: NoticeLevel
+  title: string
+  text: string
+  /** Raised by the backend's safety gate: rendered before everything else. */
+  first?: boolean
+}
 
 export interface Evidence { id: string; caption: string; url?: string }
 export interface DocRef { doc: string; page: number; quote: string }
+
+/**
+ * How an assistant turn should be rendered — decided by the backend's router,
+ * never by the client:
+ *  - conversation: ordinary chat, plain prose
+ *  - clarify:      one natural question (ambiguous request, or the technical
+ *                  workflow needs a specific detail)
+ *  - diagnosis:    the full technician answer with sections and evidence
+ *  - fallback:     no language model was available to understand the message
+ *  - offline:      the Orion engine itself could not be reached
+ */
+export type MessageKind = 'conversation' | 'clarify' | 'diagnosis' | 'fallback' | 'offline'
 
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   at: number
   mode: Mode
+  kind?: MessageKind
   text?: string
   head?: string
   attachments?: string[]

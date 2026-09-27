@@ -10,7 +10,9 @@ def _manual(client, manual_pdf):
         "file": ("CNC-M04 Service Manual.pdf", manual_pdf, "application/pdf")}).json()
 
 
-def test_agent_retrieves_quotes_and_cites(client, manual_pdf):
+def test_agent_retrieves_quotes_and_cites(client, manual_pdf, llm):
+    """RETRIEVE runs before REASON, the manual's passage reaches the model, and
+    the answer cites the page it came from."""
     _manual(client, manual_pdf)
     body = client.post("/api/chat", json={
         "message": "Fault code E17 is showing on the drive. What does it mean and where "
@@ -19,34 +21,33 @@ def test_agent_retrieves_quotes_and_cites(client, manual_pdf):
     tools_used = {s["tool"] for s in body["work_trail"]}
     assert "search_documents" in tools_used, "the agent did not consult the manual"
 
-    text = body["text"]
-    assert "E17" in text
-    assert "thermal overload" in text.lower(), "the manual's own wording was not carried through"
+    tech = [c for c in llm.calls if c["purpose"] == "technical"]
+    evidence_msgs = " ".join(m["content"] for m in tech[0]["messages"] if m["role"] == "system")
+    assert "thermal overload" in evidence_msgs.lower(), "the manual's passage never reached the model"
 
     doc_refs = [r for r in body["refs"] if r["kind"] in ("document", "document_page")]
     assert doc_refs, "an answer drawn from a manual must cite it"
     assert doc_refs[0]["page"] == 2
 
 
-def test_agent_never_invents_a_measurement(client, manual_pdf):
-    _manual(client, manual_pdf)
+def test_agent_never_invents_a_measurement(client, llm):
+    """A figure the model asserts that no tool or technician produced is flagged."""
+    llm.technical_fn = lambda messages, images, tools, ctx: {
+        "text": "Observed\n- The housing is at 95 °C\nLikely causes\n- Possible: overload",
+        "tool_calls": []}
     body = client.post("/api/chat", json={
         "message": "The motor is running hot. What temperature is it at?"}).json()
-    # No reading was supplied, so none may be asserted.
-    assert body["unverified_figures"] == [] or all(
-        f not in body["text"] for f in [])
-    joined = " ".join(
-        item for s in body["sections"] for item in s["items"]).lower()
-    assert "needs confirmation" in json.dumps(body["sections"]).lower() \
-        or "temperature" in joined
+    assert any("95" in f for f in body["unverified_figures"])
 
 
-def test_agent_echoes_only_the_measurement_the_technician_gave(client):
+def test_agent_echoes_only_the_measurement_the_technician_gave(client, llm):
+    llm.technical_fn = lambda messages, images, tools, ctx: {
+        "text": "Observed\n- You measured 87 C at the housing\nLikely causes\n- Possible: "
+                "restricted cooling", "tool_calls": []}
     body = client.post("/api/chat", json={
         "message": "The motor is overheating, I measured 87 C at the housing."}).json()
     assert "87" in body["text"]
-    observed = next(s for s in body["sections"] if s["kind"] == "observed")
-    assert any("87" in item for item in observed["items"])
+    assert body["unverified_figures"] == []
 
 
 def test_safety_layer_leads_with_isolation(client):
@@ -72,7 +73,10 @@ def test_safety_layer_flags_unsupported_figures_but_allows_cited_ones():
     assert any("1450" in f for f in verdict["unverified_figures"])
 
 
-def test_hazard_notice_is_attached_to_the_response(client):
+def test_hazard_notice_is_attached_to_the_response(client, llm):
+    llm.technical_fn = lambda messages, images, tools, ctx: {
+        "text": "Observed\n- The breaker trips under load\nWhat to test next\n- Test the "
+                "winding insulation resistance at the terminals", "tool_calls": []}
     body = client.post("/api/chat", json={
         "message": "The drive keeps tripping the breaker. What should I check?"}).json()
     assert "electrical" in body["hazards"]
@@ -112,7 +116,7 @@ def test_measurement_without_a_value_is_rejected(client):
     assert r.status_code == 422
 
 
-def test_job_history_is_retrieved_on_the_second_visit(client):
+def test_job_history_is_retrieved_on_the_second_visit(client, llm):
     machine = client.post("/api/machines", json={
         "name": "CNC Motor #04", "serial_number": "SN-99123"}).json()
     job = client.post("/api/jobs", json={
@@ -164,7 +168,7 @@ def test_fetch_refuses_local_addresses(client):
         assert r["fetched"] is False
 
 
-def test_streaming_emits_trail_then_text(client, manual_pdf):
+def test_streaming_emits_trail_then_text(client, manual_pdf, llm):
     _manual(client, manual_pdf)
     with client.stream("POST", "/api/chat/stream",
                        json={"message": "What does E17 mean?"}) as resp:
@@ -189,27 +193,17 @@ def test_every_response_declares_which_model_produced_it(client):
         assert model["npu"] is False
 
 
-def test_web_search_is_a_last_resort_not_a_parallel_source(client, manual_pdf):
-    """§16 fixes the order: job context, documents, memory, and only then the web."""
-    from app.models.heuristic import _local_knowledge_thin
-
-    strong = {"search_documents": {"results": [{"score": 0.02, "exact_matches": ["E17"]}]}}
-    assert _local_knowledge_thin(strong) is False
-
-    remembered = {"search_memory": {"memories": [{"id": "m1"}]}}
-    assert _local_knowledge_thin(remembered) is False
-
-    assert _local_knowledge_thin({}) is True
-    assert _local_knowledge_thin(
-        {"search_documents": {"results": [{"score": 0.005, "exact_matches": []}]}}) is True
-
-    # And the first round never reaches for the web, even when it is permitted.
+def test_web_search_is_a_last_resort_not_a_parallel_source(client, manual_pdf, llm):
+    """§16 fixes the order: job context, documents, memory, and only then the web.
+    The local manual is searched before the model reasons, and web tools are
+    not even offered unless web research is switched on and configured."""
     _manual(client, manual_pdf)
     body = client.post("/api/chat", json={
         "message": "What does fault code E17 mean?", "web": True}).json()
     trail = [s["tool"] for s in body["work_trail"]]
-    assert "search_documents" in trail
-    assert trail.index("search_documents") == 0 or "web_search" not in trail[:1]
+    assert trail and trail[0] == "search_documents"
+    offered = {t["name"] for c in llm.calls if c["purpose"] == "technical" for t in c["tools"]}
+    assert "web_search" not in offered, "web tools offered with no provider configured"
 
 
 def test_the_same_memory_is_not_stored_twice(client):

@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { Access, Conversation, Message, Mode, Prefs, Profile, Route, Step, VFile } from './types'
-import { answer, planSteps, type AskContext } from './assistant'
 import * as api from './api'
 import { DEFAULT_ACCESS, DEFAULT_PREFS, DEFAULT_PROFILE, SEED_CONVERSATIONS, SEED_FILES } from './seed'
 import { load, loadList, save, uid } from './util'
@@ -329,7 +328,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const ask = useCallback<Store['ask']>((text, mode, attachments = []) => {
     const convoId = activeIdRef.current ?? activeId ?? newConversation()
     const snapshot = latest.current
-    const convo = snapshot.conversations.find((c) => c.id === convoId)
 
     // Files sent with a message belong to that conversation, so they stay in
     // its Files dock and can be referred to later. Doing it here rather than
@@ -353,42 +351,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attachments: attachments.length ? attachments : undefined,
     })
 
-    const ctx: AskContext = {
-      files: snapshot.files.filter((f) => f.state === 'ready' || convo?.fileIds.includes(f.id)),
-      hasHistory: (convo?.messages.length ?? 0) > 1,
-      machine: convo?.machine,
-      webSearch: snapshot.prefs.webSearch,
-      mode,
-      profession: snapshot.profile.profession || undefined,
-      hasAttachments: attachments.length > 0,
-      // What the technician has already told us earlier in this thread, so the
-      // offline reasoner can carry a diagnosis across turns instead of asking
-      // for something it was already given.
-      priorUserTexts: (convo?.messages ?? [])
-        .filter((m) => m.role === 'user' && m.text)
-        .map((m) => m.text as string),
-    }
-
     askTimers.current.forEach((t) => window.clearTimeout(t))
     askTimers.current = []
     inFlight.current?.abort()
 
-    if (backendRef.current.online) {
-      // The backend owns the loop: it decides which tools to run, gathers the
-      // evidence, reasons over it and applies the safety review. The trail
-      // below is what really happened, not a simulation of it.
-      const controller = new AbortController()
-      inFlight.current = controller
-      setAsking({
-        conversationId: convoId,
-        steps: [{ icon: 'spark', label: 'Working on device', ms: 0 }],
-        index: 0,
+    // The client never decides what a message means. With no backend there is
+    // nothing here that can understand it, so it says exactly that.
+    const offline = () => {
+      addMessage(convoId, {
+        id: uid('a'),
+        role: 'assistant',
+        at: Date.now(),
+        mode,
+        kind: 'offline',
+        text: 'I can’t reach the Orion engine right now, so I can’t work on this yet. '
+          + 'Check that the backend is running (Profile → System status), then send it again.'
       })
+    }
 
-      void api
-        .ask(text, {
+    if (!backendRef.current.online) {
+      offline()
+      return convoId
+    }
+
+    // The backend owns everything from here: its router decides whether this
+    // is conversation or technical work, and only a technical turn runs tools.
+    const controller = new AbortController()
+    inFlight.current = controller
+    setAsking({
+      conversationId: convoId,
+      steps: [{ icon: 'spark', label: 'Thinking', ms: 0 }],
+      index: 0,
+    })
+
+    const attachedFiles = snapshot.files.filter((f) => attachments.includes(f.id))
+    const attachmentInfo: api.AttachmentInfo[] = attachedFiles.map((f) => ({
+      kind: f.kind === 'pdf' ? 'pdf' : f.kind === 'image' ? 'image' : f.kind === 'text' ? 'text' : 'other',
+      name: f.name,
+    }))
+
+    void (async () => {
+      try {
+        // Photos go to the backend so the model can actually look at them.
+        const imageIds: string[] = []
+        for (const f of attachedFiles) {
+          if (f.kind !== 'image' || !f.url) continue
+          try {
+            const blob = await (await fetch(f.url)).blob()
+            imageIds.push(await api.uploadPhoto(blob, remoteConvo.current[convoId]))
+          } catch { /* the router still knows an image was attached */ }
+        }
+        const res = await api.ask(text, {
           conversationId: remoteConvo.current[convoId],
-          imageIds: [],
+          imageIds,
+          attachments: attachmentInfo,
           mode,
           web: snapshot.prefs.webSearch,
           profession: snapshot.profile.profession || undefined,
@@ -397,58 +413,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           onStep: (steps) =>
             setAsking({ conversationId: convoId, steps, index: steps.length }),
         })
-        .then((res) => {
-          remoteConvo.current[convoId] = res.conversationId
-          setAsking(null)
-          inFlight.current = null
-          addMessage(convoId, {
-            ...res.message,
-            attachments: attachments.length ? attachments : undefined,
-          })
-          if (res.degradedTools.length) {
-            toast(
-              'Some senses are unavailable',
-              `${res.degradedTools.join(', ')} — the answer says what could not be confirmed.`,
-            )
-          }
-        })
-        .catch((err: unknown) => {
-          if (controller.signal.aborted) return
-          inFlight.current = null
-          setAsking(null)
-          setBackend({ online: false, reason: err instanceof Error ? err.message : 'unreachable' })
-          toast(
-            'Lost the local backend',
-            'Falling back to the offline demo responder. Ask again once it is running.',
-          )
-          addMessage(convoId, {
-            ...answer(text, ctx),
-            attachments: attachments.length ? attachments : undefined,
-          })
-        })
-      return convoId
-    }
-
-    const steps = planSteps(text, ctx)
-    // A conversational turn plans no steps, so there is no work trail to show.
-    if (steps.length) setAsking({ conversationId: convoId, steps, index: 0 })
-
-    let elapsed = 0
-    steps.forEach((_, i) => {
-      elapsed += steps[i].ms
-      askTimers.current.push(
-        window.setTimeout(() => setAsking({ conversationId: convoId, steps, index: i + 1 }), elapsed),
-      )
-    })
-    askTimers.current.push(
-      window.setTimeout(() => {
+        remoteConvo.current[convoId] = res.conversationId
         setAsking(null)
+        inFlight.current = null
         addMessage(convoId, {
-          ...answer(text, ctx),
+          ...res.message,
           attachments: attachments.length ? attachments : undefined,
         })
-      }, elapsed + 220),
-    )
+        if (res.degradedTools.length) {
+          toast(
+            'Some senses are unavailable',
+            `${res.degradedTools.join(', ')} — the answer says what could not be confirmed.`,
+          )
+        }
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return
+        inFlight.current = null
+        setAsking(null)
+        setBackend({ online: false, checked: true, reason: err instanceof Error ? err.message : 'unreachable' })
+        toast('Lost the Orion engine', 'Send the message again once it is running.')
+        offline()
+      }
+    })()
     return convoId
   }, [activeId, addMessage, newConversation, toast])
 

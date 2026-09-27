@@ -74,9 +74,13 @@ export interface BackendInfo {
   reason?: string
 }
 
+/** What the user attached — metadata the backend's router weighs. */
+export interface AttachmentInfo { kind: 'image' | 'pdf' | 'text' | 'document' | 'other'; name?: string }
+
 export interface AskOptions {
   conversationId?: string
   imageIds?: string[]
+  attachments?: AttachmentInfo[]
   jobId?: string
   inspectionId?: string
   mode: Mode
@@ -166,6 +170,7 @@ export async function ask(text: string, opts: AskOptions): Promise<AskResult> {
       message: text,
       conversation_id: opts.conversationId,
       image_ids: opts.imageIds ?? [],
+      attachments: opts.attachments ?? [],
       job_id: opts.jobId,
       inspection_id: opts.inspectionId,
       mode: opts.mode,
@@ -425,7 +430,7 @@ interface BackendResponse {
   message_id?: string | null
   text: string
   sections?: BackendSection[]
-  notice?: { level: string; title: string; items: string[]; note?: string | null } | null
+  notice?: { level: string; title: string; items: string[]; note?: string | null; first?: boolean } | null
   question?: string | null
   refs?: BackendRef[]
   confidence?: number | null
@@ -435,6 +440,9 @@ interface BackendResponse {
   degraded_tools?: string[]
   model?: BackendInfo['model']
   error?: { error: string; reason: string } | null
+  conversational?: boolean
+  kind?: 'conversation' | 'clarify' | 'diagnosis' | 'fallback'
+  engine_available?: boolean
 }
 
 type StreamEvent =
@@ -459,7 +467,7 @@ function noticeOf(n: BackendResponse['notice']): NoticeBlock | undefined {
     ? (n.level as NoticeBlock['level'])
     : 'need'
   const text = [...(n.items ?? []), n.note].filter(Boolean).join(' ')
-  return { level, title: n.title, text }
+  return { level, title: n.title, text, first: Boolean(n.first) }
 }
 
 function refsOf(refs: BackendRef[] | undefined): DocRef[] | undefined {
@@ -477,8 +485,26 @@ function refsOf(refs: BackendRef[] | undefined): DocRef[] | undefined {
   return out.length ? out : undefined
 }
 
-/** Backend response → the Message shape the UI already renders. */
+/** Backend response → the Message shape the UI already renders.
+ *
+ * The backend's router has already decided what kind of turn this was; the
+ * client only renders it. A conversational, clarifying or fallback turn
+ * carries no diagnostic furniture at all — just the words, plus a safety
+ * notice if the independent safety gate raised one. */
 export function toMessage(body: BackendResponse, mode: Mode): Message {
+  const kind = body.kind ?? (body.conversational ? 'conversation' : 'diagnosis')
+  if (kind !== 'diagnosis') {
+    return {
+      id: body.message_id || uid('a'),
+      role: 'assistant',
+      at: Date.now(),
+      mode,
+      kind,
+      text: body.text,
+      notice: noticeOf(body.notice),
+    }
+  }
+
   const sections: Section[] = []
   for (const s of body.sections ?? []) {
     const kind = sectionKind(s.kind)
@@ -494,6 +520,7 @@ export function toMessage(body: BackendResponse, mode: Mode): Message {
     role: 'assistant',
     at: Date.now(),
     mode,
+    kind,
     head: body.question ?? undefined,
     text: sections.length ? undefined : body.text,
     sections: sections.length ? sections : undefined,

@@ -7,10 +7,18 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class Attachment(BaseModel):
+    """What the user attached, so the router can weigh it. Metadata only —
+    the files themselves go through the upload endpoints."""
+    kind: str = Field(pattern="^(image|pdf|text|document|audio|other)$")
+    name: Optional[str] = Field(default=None, max_length=160)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: Optional[str] = None
     image_ids: List[str] = Field(default_factory=list, max_length=8)
+    attachments: List[Attachment] = Field(default_factory=list, max_length=8)
     job_id: Optional[str] = None
     inspection_id: Optional[str] = None
     mode: str = Field(default="normal", pattern="^(normal|live)$")
@@ -30,6 +38,8 @@ class Notice(BaseModel):
     title: str
     items: List[str] = Field(default_factory=list)
     note: Optional[str] = None
+    # True for the safety gate's notice, which is shown before anything else.
+    first: bool = False
 
 
 class WorkStep(BaseModel):
@@ -70,7 +80,13 @@ class ChatResponse(BaseModel):
     error: Optional[Dict[str, Any]] = None
     # True when this was ordinary conversation rather than a diagnostic turn.
     conversational: bool = False
+    # conversation | clarify | diagnosis | fallback — how the client should render it.
+    kind: str = "diagnosis"
+    # The router's decision: intent and confidence only, never its rationale.
     intent: Optional[str] = None
+    route: Optional[Dict[str, Any]] = None
+    # False when no language model was available to interpret the message.
+    engine_available: bool = True
     duration_ms: float = 0.0
     created_at: str
 

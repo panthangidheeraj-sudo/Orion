@@ -17,8 +17,9 @@ import asyncio
 import re
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
-from app.agent import context_builder, safety
-from app.agent import conversation as small_talk
+from app.agent import context_builder, router, safety
+from app.agent.prompts import conversation_prompt
+from app.agent.measurements import extract_measurements
 from app.agent.tool_registry import registry as tool_registry
 from app.config import settings
 from app.errors import ModelUnavailable
@@ -27,7 +28,7 @@ from app.logging_setup import get_logger
 from app.memory import memory_service as M
 from app.memory import sqlite as db
 from app.metrics import collector as metrics
-from app.models.heuristic import extract_measurements
+from app.models.qwen_vl import parse_tool_calls
 from app.models.registry import registry as models
 from app.util import ms, preview, timed, utc_now
 
@@ -61,6 +62,11 @@ def allowed_tools(web: bool = False, writes: bool = False) -> List[str]:
     return allow
 
 
+FALLBACK_TEXT = "I’m here. Tell me a little more about what you need."
+FALLBACK_SAFETY_TEXT = ("That sounds dangerous — please get yourself safe first; the steps are "
+                        "below. Once everything is isolated, tell me what you saw.")
+
+
 class Orchestrator:
     async def ask(
         self,
@@ -74,36 +80,70 @@ class Orchestrator:
         profile: Optional[Dict[str, Any]] = None,
         allow_writes: bool = False,
         persist: bool = True,
+        attachments: Sequence[Dict[str, Any]] = (),
     ) -> Dict[str, Any]:
+        """One turn.
+
+            SAFETY GATE  deterministic, independent, runs first, only adds
+            ROUTER       the reasoning model decides: conversation / technical / ambiguous
+            then either  a plain conversational reply
+            or           SEE → RETRIEVE → REASON → VERIFY → GUIDE → REMEMBER
+        """
         started_ms = ms()
         conversation = M.ensure_conversation(conversation_id, title=preview(question, 60))
         cid = conversation["id"]
+        attachments = [dict(a) for a in attachments][:8]
         if persist:
             M.add_message(cid, "user", question,
-                          {"image_ids": list(image_ids), "mode": mode, "job_id": job_id})
+                          {"image_ids": list(image_ids), "mode": mode, "job_id": job_id,
+                           "attachments": attachments})
 
+        doc_count = (db.query_one("SELECT COUNT(*) AS n FROM documents") or {}).get("n", 0)
+        history = context_builder.conversation_history(cid, current=question)
+        job = context_builder.job_context(job_id)
+
+        # 1. The independent safety gate. Deterministic on purpose, and the
+        #    only thing that still works with no model at all.
+        gate = safety.input_gate(question)
+
+        # 2. The router: meaning, from the model — never from keywords.
+        models.refresh_if_unavailable("reasoning")
+        reasoner = models.reasoning()
+        seen = [{"kind": "image"} for _ in image_ids] + attachments
+        decision = await router.route(reasoner, question, history, mode, seen, profile,
+                                      job.get("job_title"))
+        if decision.available and decision.requires_safety_gate and not gate:
+            gate = dict(safety.GENERIC_CAUTION)
+
+        if not decision.available:
+            return self._fallback(cid, question, gate, decision, mode, job_id,
+                                  started_ms, persist)
+        if decision.intent in ("conversation", "ambiguous"):
+            return await self._converse(decision, cid, question, history, image_ids,
+                                        profile, gate, mode, job_id, started_ms, persist)
+
+        # 3. Technical: the full workflow.
         allow = allowed_tools(web, allow_writes)
         schemas = tool_registry.schemas(allow=allow, online_allowed=web)
-        doc_count = (db.query_one("SELECT COUNT(*) AS n FROM documents") or {}).get("n", 0)
-
-        # A greeting is not a diagnostic request. Answer it like a person and
-        # stop — no retrieval, no tool calls, no NPU inference (§8's efficiency
-        # argument applies to idle chat too).
-        #
-        # Nobody attaches a photograph to say hello, so an image on the turn
-        # settles it: "what is this?" over a picture of a bearing housing is
-        # work, whatever the words look like on their own.
-        intent = None if image_ids else small_talk.classify(question)
-        if intent:
-            return self._conversational(
-                intent, conversation_id=cid, question=question, job_id=job_id,
-                mode=mode, doc_count=doc_count, started_ms=started_ms, persist=persist)
-
         evidence: Dict[str, Any] = {}
         trail: List[Dict[str, Any]] = []
-        reasoner = models.reasoning()
         result: Dict[str, Any] = {}
         degraded: List[str] = []
+
+        def _absorb(outcomes):
+            for name, payload in outcomes:
+                trail.append(payload["trail"])
+                evidence[name] = payload["result"]
+                if payload["result"].get("degraded"):
+                    degraded.append(name)
+
+        # SEE + RETRIEVE up front, so the evidence is there whatever the model's
+        # tool-calling ability. The model may ask for more below.
+        seed = _seed_calls(question, history, image_ids, doc_count, job_id)
+        if seed:
+            base_ctx = {"conversation_id": cid, "job_id": job_id, "image_ids": list(image_ids),
+                        "mode": mode, "evidence": evidence}
+            _absorb(await self._run_tools(seed, base_ctx, allow, cid))
 
         for round_index in range(settings.agent_max_tool_rounds):
             built = context_builder.build(
@@ -111,6 +151,7 @@ class Orchestrator:
                 mode=mode, profile=profile, tool_schemas=schemas,
                 document_count=doc_count, web_requested=web, round_index=round_index)
             built["context"]["inspection_id"] = inspection_id
+            built["context"]["purpose"] = "technical"
 
             try:
                 with timed() as reason_t:
@@ -119,21 +160,14 @@ class Orchestrator:
                         tools=schemas, context=built["context"])
                 metrics.record_reasoning(reason_t["ms"])
             except ModelUnavailable as exc:
-                log.warning("reasoning unavailable: %s", exc.reason)
-                return self._no_model_response(cid, question, evidence, trail,
-                                               exc.to_dict(), ms() - started_ms,
-                                               persist)
+                log.warning("reasoning unavailable mid-turn: %s", exc.reason)
+                return self._fallback(cid, question, gate, router.RouteDecision(
+                    available=False, failure=exc.reason), mode, job_id, started_ms, persist)
 
             calls = [c for c in (result.get("tool_calls") or []) if c.get("tool")]
             if not calls:
                 break
-
-            outcomes = await self._run_tools(calls, built["context"], allow, cid)
-            for name, payload in outcomes:
-                trail.append(payload["trail"])
-                evidence[name] = payload["result"]
-                if payload["result"].get("degraded"):
-                    degraded.append(name)
+            _absorb(await self._run_tools(calls, built["context"], allow, cid))
 
         elapsed = ms() - started_ms
         metrics.record_response(elapsed)
@@ -141,74 +175,78 @@ class Orchestrator:
             conversation=conversation, question=question, result=result,
             evidence=evidence, trail=trail, image_ids=list(image_ids), job_id=job_id,
             inspection_id=inspection_id, mode=mode, degraded=degraded,
-            total_ms=round(elapsed, 2), persist=persist)
+            total_ms=round(elapsed, 2), persist=persist, gate=gate, decision=decision)
 
-    # -------------------------------------------------------- conversation
-    def _conversational(self, intent, conversation_id, question, job_id, mode,
-                        doc_count, started_ms, persist) -> Dict[str, Any]:
-        """A chat turn: short reply, none of the diagnostic furniture."""
-        job_title = None
-        if job_id:
-            try:
-                job_title = M.get_job(job_id).get("title")
-            except Exception:
-                job_title = None
+    # --------------------------------------------------------- shared shape
+    @staticmethod
+    def _model_info() -> Dict[str, Any]:
+        h = models.reasoning().health()
+        return {"provider": h.provider, "model_id": h.model_id, "accelerator": h.accelerator,
+                "npu": h.npu, "synthetic": h.synthetic}
 
-        health = models.reasoning().health()
-        turns = len(M.get_messages(conversation_id, limit=6))
-        built = small_talk.reply(intent, {
-            "document_count": doc_count,
-            "job_title": job_title,
-            "has_history": turns > 1,
-            "display_name": (M.ensure_user() or {}).get("display_name"),
-            "engine": {"provider": health.provider, "model_id": health.model_id,
-                       "accelerator": health.accelerator, "npu": health.npu,
-                       "synthetic": health.synthetic},
-        })
-
-        # No safety review here: this is our own fixed copy, not model output,
-        # and it describes no procedure. Running the hazard scanner over it
-        # would staple "Isolate the supply" onto the word "hello".
+    def _plain(self, cid, text, kind, gate, decision, mode, job_id, started_ms, persist,
+               extra_meta: Optional[Dict[str, Any]] = None, record: bool = True) -> Dict[str, Any]:
+        """A reply with none of the diagnostic furniture: no sections, no
+        confidence, no work trail, no suggestion chips. A safety notice from the
+        gate is the only thing that can ride along — and it goes first."""
         elapsed = ms() - started_ms
-        metrics.record_response(elapsed)
-        log.info("conversational turn (%s) in %.1f ms — no tools, no retrieval",
-                 intent, elapsed)
-
+        if record:
+            metrics.record_response(elapsed)
+        notice = _public_notice(gate)
         response = {
-            "conversation_id": conversation_id,
-            "message_id": None,
-            "text": built["text"],
-            "sections": [],
-            "notice": None,
-            "question": None,
-            "refs": [],
-            "evidence_keys": [],
-            "work_trail": [],
-            "confidence": None,
-            "confidence_label": None,
-            "hazards": [],
-            "safety_notes": [],
-            "unverified_figures": [],
-            "degraded_tools": [],
-            "memory": None,
-            "follow_ups": built["meta"]["follow_ups"],
-            "conversational": True,
-            "intent": intent,
-            "mode": mode,
-            "job_id": job_id,
-            "inspection_id": None,
-            "model": {"provider": health.provider, "model_id": health.model_id,
-                      "accelerator": health.accelerator, "npu": health.npu,
-                      "synthetic": health.synthetic},
-            "duration_ms": round(elapsed, 2),
-            "created_at": utc_now(),
+            "conversation_id": cid, "message_id": None, "text": text,
+            "sections": [], "notice": notice, "question": None, "refs": [],
+            "evidence_keys": [], "work_trail": [], "confidence": None,
+            "confidence_label": None, "hazards": list((gate or {}).get("hazards") or []),
+            "safety_notes": [], "unverified_figures": [], "degraded_tools": [],
+            "memory": None, "follow_ups": [],
+            "conversational": True, "kind": kind,
+            "intent": decision.intent, "route": decision.public(),
+            "engine_available": decision.available,
+            "mode": mode, "job_id": job_id, "inspection_id": None,
+            "model": self._model_info(),
+            "duration_ms": round(elapsed, 2), "created_at": utc_now(),
         }
         if persist:
             response["message_id"] = M.add_message(
-                conversation_id, "assistant", built["text"],
-                {"conversational": True, "intent": intent,
-                 "follow_ups": response["follow_ups"]})["id"]
+                cid, "assistant", text,
+                {"conversational": True, "kind": kind, "intent": decision.intent,
+                 "notice": notice, **(extra_meta or {})})["id"]
         return response
+
+    def _fallback(self, cid, question, gate, decision, mode, job_id, started_ms, persist):
+        """No model to understand the message: say only what is safe to say."""
+        log.info("router unavailable (%s) — plain fallback", decision.failure)
+        text = FALLBACK_SAFETY_TEXT if gate else FALLBACK_TEXT
+        return self._plain(cid, text, "fallback", gate, decision, mode, job_id, started_ms,
+                           persist, {"engine_available": False})
+
+    async def _converse(self, decision, cid, question, history, image_ids, profile, gate,
+                        mode, job_id, started_ms, persist) -> Dict[str, Any]:
+        """Ordinary conversation (or a clarifying question), written by the model."""
+        reasoner = models.reasoning()
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": conversation_prompt(decision.intent or "conversation",
+                                                              profile)},
+            *history,
+            {"role": "user", "content": question},
+        ]
+        images = context_builder.resolve_images(list(image_ids))
+        try:
+            result = await reasoner.generate(
+                messages, images=images or None, tools=None,
+                context={"purpose": decision.intent, "temperature": 0.6})
+        except ModelUnavailable as exc:
+            return self._fallback(cid, question, gate, router.RouteDecision(
+                available=False, failure=exc.reason), mode, job_id, started_ms, persist)
+
+        text, _ignored_calls = parse_tool_calls(_strip_thinking(result.get("text") or ""))
+        text = text.strip() or FALLBACK_TEXT
+        # The model's own words still pass the live-work check; hazard notices
+        # are not stapled onto chat (only the input gate may add one).
+        text = safety.review(text, evidence={}, user_text=question)["text"]
+        kind = "clarify" if decision.intent == "ambiguous" else "conversation"
+        return self._plain(cid, text, kind, gate, decision, mode, job_id, started_ms, persist)
 
     # ------------------------------------------------------------- tool run
     async def _run_tools(self, calls: Sequence[Dict[str, Any]], context: Dict[str, Any],
@@ -238,15 +276,43 @@ class Orchestrator:
 
     # ------------------------------------------------------------- finalise
     def _finalise(self, conversation, question, result, evidence, trail, image_ids,
-                  job_id, inspection_id, mode, degraded, total_ms, persist):
-        text = result.get("text") or ""
+                  job_id, inspection_id, mode, degraded, total_ms, persist, gate=None,
+                  decision=None):
+        text = _strip_thinking(result.get("text") or "").strip()
         sections = result.get("sections") or _sections_from_text(text)
         meta = result.get("meta") or {}
-
         verdict = safety.review(text, evidence=evidence, user_text=question, sections=sections)
 
-        notice = None
-        if verdict["hazard_notices"]:
+        # The model decided it didn't have enough to go on and asked one
+        # specific question. That goes back as a plain message — no
+        # confidence meter or "Observed" scaffolding around a question.
+        clarifying = not sections
+        if clarifying:
+            response = self._plain(conversation["id"], verdict["text"] or text, "clarify", gate,
+                                   decision, mode, job_id, ms() - total_ms, persist=False,
+                                   record=False)
+            response.update({
+                "conversational": False, "work_trail": trail,
+                "evidence_keys": sorted(evidence), "degraded_tools": sorted(set(degraded)),
+                "refs": _refs_from_evidence(evidence), "duration_ms": total_ms,
+                "inspection_id": inspection_id, "unverified_figures": verdict["unverified_figures"],
+                "safety_notes": verdict["notes"],
+            })
+            if persist:
+                response["message_id"] = M.add_message(
+                    conversation["id"], "assistant", response["text"],
+                    {"kind": "clarify", "work_trail": trail, "notice": response["notice"],
+                     "model": response["model"]})["id"]
+            return response
+
+        # Safety order: the input gate first (an active hazard the user
+        # reported), then hazards the answer itself touches.
+        notice = _public_notice(gate)
+        if notice and verdict["hazard_notices"]:
+            notice["items"] = notice["items"] + [n for n in verdict["hazard_notices"]
+                                                 if n not in notice["items"]]
+            notice["note"] = verdict["professional_note"]
+        elif verdict["hazard_notices"]:
             notice = {"level": "safety", "title": "Before you touch it",
                       "items": verdict["hazard_notices"],
                       "note": verdict["professional_note"]}
@@ -254,42 +320,43 @@ class Orchestrator:
             notice = {"level": "need", "title": "Figures to confirm",
                       "items": verdict["unverified_figures"]}
 
-        question_asked = (evidence.get("ask_user") or {}).get("question")
         refs = meta.get("refs") or _refs_from_evidence(evidence)
         confidence = meta.get("confidence")
         if confidence is None:
             confidence = _confidence_from_evidence(evidence)
         remembered = self._remember(question, evidence, job_id, conversation["id"])
 
-        reasoner_health = models.reasoning().health()
+        hazards = [h["key"] for h in verdict["hazards"]]
+        for k in (gate or {}).get("hazards") or []:
+            if k not in hazards:
+                hazards.insert(0, k)
         response = {
             "conversation_id": conversation["id"],
             "message_id": None,
             "text": verdict["text"],
             "sections": sections,
             "notice": notice,
-            "question": question_asked,
+            "question": None,
             "refs": refs,
             "evidence_keys": sorted(evidence),
             "work_trail": trail,
             "confidence": confidence,
             "confidence_label": meta.get("confidence_label") or _label(confidence),
-            "hazards": [h["key"] for h in verdict["hazards"]],
+            "hazards": hazards,
             "safety_notes": verdict["notes"],
             "unverified_figures": verdict["unverified_figures"],
             "degraded_tools": sorted(set(degraded)),
             "memory": remembered,
             "follow_ups": _follow_ups(evidence, verdict, question),
+            "conversational": False,
+            "kind": "diagnosis",
+            "intent": "technical",
+            "route": decision.public() if decision else None,
+            "engine_available": True,
             "mode": mode,
             "job_id": job_id,
             "inspection_id": inspection_id,
-            "model": {
-                "provider": reasoner_health.provider,
-                "model_id": reasoner_health.model_id,
-                "accelerator": reasoner_health.accelerator,
-                "npu": reasoner_health.npu,
-                "synthetic": reasoner_health.synthetic,
-            },
+            "model": self._model_info(),
             "duration_ms": total_ms,
             "created_at": utc_now(),
         }
@@ -298,30 +365,8 @@ class Orchestrator:
                 conversation["id"], "assistant", verdict["text"],
                 {k: response[k] for k in
                  ("sections", "notice", "refs", "confidence", "confidence_label",
-                  "work_trail", "hazards", "degraded_tools", "model", "question")})
+                  "work_trail", "hazards", "degraded_tools", "model", "kind")})
             response["message_id"] = stored["id"]
-        return response
-
-    def _no_model_response(self, cid, question, evidence, trail, error, total_ms, persist):
-        """§25: say exactly what is missing rather than producing something anyway."""
-        text = ("No reasoning model is available on this machine, so I will not attempt a "
-                "diagnosis. Export a VLM into data/models/ or start a local model server, "
-                "then ask again. Everything else — documents, memory and the job record — "
-                "still works.")
-        response = {
-            "conversation_id": cid, "message_id": None, "text": text,
-            "sections": [{"kind": "observed", "title": "Status", "items": [text]}],
-            "notice": {"level": "error", "title": "Reasoning model unavailable",
-                       "items": [error.get("reason", "")]},
-            "error": error, "refs": [], "evidence_keys": sorted(evidence),
-            "work_trail": trail, "confidence": 0.0, "confidence_label": "Needs evidence",
-            "hazards": [], "safety_notes": [], "unverified_figures": [],
-            "degraded_tools": [], "memory": None, "follow_ups": [],
-            "duration_ms": total_ms, "created_at": utc_now(),
-        }
-        if persist:
-            response["message_id"] = M.add_message(cid, "assistant", text,
-                                                   {"error": error})["id"]
         return response
 
     # -------------------------------------------------------------- REMEMBER
@@ -484,6 +529,47 @@ def _follow_ups(evidence: Dict[str, Any], verdict: Dict[str, Any], question: str
         out.append("Upload the manual for this machine")
     out.append("Build an inspection checklist")
     return out[:4]
+
+
+_THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
+
+
+def _strip_thinking(text: str) -> str:
+    """Reasoning models (Qwen3, DeepSeek-R1…) may emit a <think> block first."""
+    return _THINK.sub("", text or "").strip()
+
+
+def _public_notice(gate: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not gate:
+        return None
+    # `first`: this came from the safety gate, so it leads the reply — ahead
+    # of any conversational text or diagnostic sections.
+    return {"level": gate["level"], "title": gate["title"], "items": list(gate["items"]),
+            "note": gate.get("note"), "first": True}
+
+
+def _seed_calls(question: str, history: Sequence[Dict[str, str]], image_ids: Sequence[str],
+                doc_count: int, job_id: Optional[str]) -> List[Dict[str, Any]]:
+    """SEE and RETRIEVE for a technical turn, before the model reasons.
+
+    This is not routing — the router has already decided the turn is
+    technical. It just makes sure the evidence exists even when a small local
+    model is poor at calling tools itself.
+    """
+    calls: List[Dict[str, Any]] = []
+    if image_ids:
+        newest = image_ids[-1]
+        calls.append({"tool": "vision_detect", "arguments": {"image_id": newest}})
+        calls.append({"tool": "ocr_extract", "arguments": {"image_id": newest}})
+    if doc_count:
+        # A short follow-up ("drive end") only makes sense with what came before.
+        earlier = [h["content"] for h in history if h.get("role") == "user"][-2:]
+        query = " ".join([*earlier, question])[-300:].strip()
+        if len(query) >= 2:
+            calls.append({"tool": "search_documents", "arguments": {"query": query}})
+    if job_id:
+        calls.append({"tool": "get_job_history", "arguments": {"job_id": job_id}})
+    return calls
 
 
 orchestrator = Orchestrator()

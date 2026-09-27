@@ -8,7 +8,7 @@ visits, and checks that the second visit genuinely benefits from the first.
 from __future__ import annotations
 
 
-def test_same_machine_across_two_sessions(client, manual_pdf, photo_bytes):
+def test_same_machine_across_two_sessions(client, manual_pdf, photo_bytes, llm):
     # ---- setup: the vault has the manual for this machine
     client.post("/api/documents/upload", files={
         "file": ("CNC-M04 Service Manual.pdf", manual_pdf, "application/pdf")})
@@ -29,14 +29,14 @@ def test_same_machine_across_two_sessions(client, manual_pdf, photo_bytes):
                           "showing. I measured 87 C at the housing.",
               "job_id": job["id"], "inspection_id": insp["id"]}).json()
 
-    # RETRIEVE: it went to the manual, and REASON: it used what the manual says.
-    assert "search_documents" in {s["tool"] for s in first["work_trail"]}
+    # SEE and RETRIEVE ran, and the manual's passage reached the answer.
+    tools_first = {s["tool"] for s in first["work_trail"]}
+    assert {"vision_detect", "ocr_extract", "search_documents"} <= tools_first
     assert "thermal overload" in first["text"].lower()
-    # VERIFY: the only figure it states is the one the technician supplied.
-    assert "87" in first["text"]
-    # GUIDE: concrete next tests, and a hazard notice for a hot electrical machine.
-    next_steps = next(s for s in first["sections"] if s["kind"] == "next")
-    assert len(next_steps["items"]) >= 3
+    # VERIFY: nothing the model said is an unbacked figure.
+    assert first["unverified_figures"] == []
+    # GUIDE: a next step, and a hazard notice for a hot electrical machine.
+    assert any(s["kind"] == "next" and s["items"] for s in first["sections"])
     assert first["hazards"]
 
     # The technician records what they actually did.
@@ -95,7 +95,7 @@ def test_report_on_an_empty_job_invents_nothing(client):
     assert "no values have been estimated" in md.lower()
 
 
-def test_conversation_survives_and_lists(client):
+def test_conversation_survives_and_lists(client, llm):
     first = client.post("/api/chat", json={"message": "The press is leaking oil."}).json()
     cid = first["conversation_id"]
     client.post("/api/chat", json={"message": "It drips from the rod end.",
@@ -112,7 +112,14 @@ def test_conversation_survives_and_lists(client):
     assert client.get(f"/api/conversations/{cid}").status_code == 404
 
 
-def test_metrics_do_not_invent_npu_numbers(client):
+def test_metrics_do_not_invent_npu_numbers(client, llm):
+    def technical(messages, images, tools, ctx):
+        if "search_memory" not in ctx["evidence"]:
+            return {"text": "", "tool_calls": [{"tool": "search_memory",
+                                                "arguments": {"query": "fan noise"}}]}
+        return {"text": "Observed\n- Nothing on record for this fan", "tool_calls": []}
+
+    llm.technical_fn = technical
     client.post("/api/chat", json={"message": "The fan is noisy."})
     body = client.get("/api/metrics").json()
     assert body["tool_latency"]

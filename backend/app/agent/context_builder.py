@@ -55,15 +55,22 @@ def job_context(job_id: Optional[str]) -> Dict[str, Any]:
     }
 
 
-def conversation_history(conversation_id: str) -> List[Dict[str, str]]:
-    rows = M.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES)
+def conversation_history(conversation_id: str,
+                         current: Optional[str] = None) -> List[Dict[str, str]]:
+    """Earlier turns, oldest first. The current message is persisted before
+    the turn runs, so it is dropped from the tail here — callers append it
+    themselves, and it must not appear twice."""
+    rows = M.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES + 1)
     out: List[Dict[str, str]] = []
     for r in rows:
         content = r["content"]
         if r["role"] == "assistant" and len(content) > 1200:
             content = content[:1200] + "…"
         out.append({"role": r["role"], "content": content})
-    return out
+    if current is not None and out and out[-1]["role"] == "user" \
+            and out[-1]["content"] == current:
+        out.pop()
+    return out[-MAX_HISTORY_MESSAGES:]
 
 
 def resolve_images(image_ids: Sequence[str]) -> List[ImageRef]:
@@ -116,9 +123,10 @@ def build(question: str, conversation_id: str, evidence: Dict[str, Any],
         {"role": "system", "content": system_prompt(tool_schemas, profile)},
         {"role": "system", "content": "\n".join(preamble)},
     ]
-    messages.extend(conversation_history(conversation_id))
-    if evidence:
-        messages.append({"role": "system", "content": evidence_block(evidence)})
+    messages.extend(conversation_history(conversation_id, current=question))
+    # Always stated, even when empty: "no tool evidence" is itself something
+    # the model must know before it describes anything.
+    messages.append({"role": "system", "content": evidence_block(evidence)})
     messages.append({"role": "user", "content": question})
 
     images = resolve_images(list(image_ids))

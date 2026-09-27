@@ -54,7 +54,7 @@ configuration, not by editing code:
 
 | Role | Selectable providers |
 |---|---|
-| reasoning | `onnxruntime-genai`, `local-openai-compat`, `heuristic-offline` |
+| reasoning | `onnxruntime-genai`, `local-openai-compat` |
 | detector | `yolo-onnx`, `yolo-world-onnx` |
 | classifier | `efficientnet-onnx` |
 | segmenter | `onnx-seg`, `sam2-onnx`, `mobilesam-onnx` |
@@ -149,16 +149,17 @@ When a model fails Compute validation and is swapped, append a row:
 
 ## What "synthetic" means
 
-Two roles ship deterministic stand-ins so the full agent loop runs before any
-export exists:
+One role ships a deterministic stand-in:
 
-- **`heuristic_offline_v1`** — rule-based tool selection plus evidence-bound
-  composition in the §18 technician structure. Not a language model. It
-  cannot generalise, and it produces no tokens/sec or NPU figures.
 - **`lexical_hash_v1`** — stop-filtered hashed word and character-trigram bag,
   L2-normalised. A real lexical embedding, genuinely useful for part numbers
   and error codes, but not semantic.
 
-Both are flagged `synthetic: true` in `/api/models/status`, logged at startup,
+There is deliberately **no reasoning stand-in**. The rule-based
+`heuristic_offline_v1` reasoner and the regex intent classifier were removed:
+routing and diagnosis come from a real language model, and without one Orion
+says it can't interpret requests rather than imitating understanding.
+
+It is flagged `synthetic: true` in `/api/models/status`, logged at startup,
 and surfaced in every chat response under `model`. Replacing them with real
 exports is Phase 9 of §22.

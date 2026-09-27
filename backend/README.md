@@ -1,4 +1,4 @@
-# VisionField Copilot — backend
+# Orion — backend
 
 A local-first multimodal field-technician agent. Python + FastAPI, running
 entirely on the machine in front of the technician.
@@ -47,29 +47,36 @@ demo responder when it is not running. Override the address with
 
 This is deliberate, and it is the part worth understanding.
 
-A fresh checkout has no exported models, so six of the nine adapter roles
-report `unavailable` and two run **deterministic stand-ins**:
+A fresh checkout has no exported models, so seven of the nine adapter roles
+report `unavailable` and one runs a **deterministic stand-in**:
 
 | Role | Without an export | Reported as |
 |---|---|---|
-| reasoning | rule-based tool selection + evidence-bound composition | `synthetic: true`, `npu: false` |
+| reasoning | **none** — see below | `unavailable` |
 | embedding | stop-filtered hashed word/trigram bag | `synthetic: true`, `npu: false` |
 | tracker | classical IoU/centroid association | `cpu-classical`, not synthetic |
 | detector, classifier, segmenter, ocr, stt, tts | unavailable, with a named fallback | §25 error envelope |
 
-Everything still works: documents are ingested, indexed and cited; the agent
-loop runs; job memory persists; safety review applies; reports generate. What
-you do **not** get is a language model, and nothing anywhere claims otherwise.
-`GET /api/models/status` lists which roles are stand-ins, the startup log warns
-about them, and every chat response carries a `model` block saying which
-provider produced it.
+Documents are still ingested, indexed and searchable; job memory persists;
+reports generate. But **nothing interprets messages without a language
+model**. There is no rule-based fallback that pretends to understand: with no
+model the reply is simply "I'm here. Tell me a little more about what you
+need." — while the independent safety gate still leads with getting safe if
+someone reports sparks, smoke or exposed conductors.
 
-The point is that when you replace the stand-ins with real exports, nothing
-around them changes — and if an export fails Compute validation, the honest
-answer is already the default rather than an awkward retreat.
+### Running a local model
 
-See **MODEL_STATUS.md** for the current state and how to validate a model on
-the target machine.
+Any OpenAI-compatible server on this machine works — Ollama, llama.cpp or
+LM Studio:
+
+    ollama pull qwen2.5:7b          # or any chat model you prefer
+    ollama serve                    # listens on 127.0.0.1:11434
+
+Orion picks it up automatically (it re-checks every 20 s; no restart needed).
+Pin a model with `VF_LOCAL_LLM_MODEL=qwen2.5:7b`, or point elsewhere on this
+machine with `VF_LOCAL_LLM_URL`. Only loopback addresses are accepted.
+`python scripts/router_qa.py` then checks how that model routes a set of real
+messages and multi-turn transitions.
 
 ---
 
@@ -98,42 +105,38 @@ backend/
 
 ---
 
-## It holds a normal conversation
+## One model-driven router
 
-A field assistant that answers "hi" with *"I need a bit more before I can
-narrow this down"* is behaving like a form. So a message that is purely
-conversational short-circuits the whole loop in `app/agent/conversation.py`:
-no retrieval, no tool calls, no confidence meter, no hazard banner — just a
-short reply, in about half a millisecond.
+Every turn starts with two independent steps in `app/agent/orchestrator.py`:
 
-It runs *before* the reasoning provider, on purpose. A greeting should not
-spend an NPU inference or a document search (§8's efficiency argument applies
-to idle chat as much as to camera frames), and the answer should not depend on
-whether a VLM happens to be exported yet.
+1. **Safety gate** (`app/agent/safety.py` `input_gate`). The one deliberately
+   deterministic check on what the user says. If they report sparks, arcing,
+   smoke, fire, exposed live conductors or a shock, the reply leads with
+   getting safe — with or without a model. It can only ever *add* a notice; it
+   never decides intent.
+2. **Router** (`app/agent/router.py`). The configured reasoning model reads the
+   message together with the recent conversation, the mode, any attachments
+   and the profile, and must return strict JSON:
 
-A chat turn also carries no suggestion chips — the reply already says what to do
-next, and a row of buttons under "hello" is the product showing off rather than a
-technician answering. Follow-ups stay under a diagnosis, where they point at a
-specific page or a specific next test.
+       {"intent": "conversation" | "technical" | "ambiguous",
+        "confidence": 0.0-1.0, "reason": "...", "requires_safety_gate": false}
 
-Greetings, thanks, farewells, acknowledgements, "what can you do?" and "are you
-ChatGPT?" are all handled, and the last two answer from what is actually there:
-the capability reply says whether the vault is empty, and the identity reply
-names the real engine, including admitting when it is a deterministic stand-in.
+   Servers that support it are asked for JSON-schema-constrained output; the
+   reply is validated strictly either way, retried once, and otherwise treated
+   as "the model couldn't decide". The rationale is logged, never returned.
 
-The classifier is deliberately conservative — it only fires when the *whole*
-message is conversational, and never when an image is attached:
+Then:
 
-| Message | Routed to |
+| Intent | What happens |
 |---|---|
-| `hi` | conversation |
-| `hi, the motor is overheating` | the agent loop |
-| `thanks, but the bearing is still grinding` | the agent loop |
-| `what can you do?` | conversation |
-| `what can you do about the vibration` | the agent loop |
-| `What is this?` **with a photo** | the agent loop |
+| `conversation` | a plain model reply — no sections, confidence, work trail or chips |
+| `ambiguous` | one natural clarifying question ("Sure. Tell me what's going wrong…") |
+| `technical` | the full workflow below; the model may also ask one *specific* question when it lacks a detail |
+| no model / invalid output | "I'm here. Tell me a little more about what you need." |
 
-Nobody attaches a photograph to say hello.
+There are no keyword lists for intent anywhere — not here, not in the
+frontend. The frontend renders the backend's `kind` (`conversation`,
+`clarify`, `diagnosis`, `fallback`) and decides nothing itself.
 
 ---
 

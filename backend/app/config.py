@@ -121,9 +121,11 @@ class Settings(BaseSettings):
     )
     qnn_backend_path: str = "QnnHtp.dll"
 
-    # Allow the deterministic offline reasoner when no real VLM asset exists.
-    # It is reported as ``synthetic`` everywhere and never claims NPU use.
-    allow_heuristic_reasoning: bool = True
+    # A local OpenAI-compatible model server (Ollama, llama.cpp, LM Studio).
+    # Loopback only. An empty model name means "the first chat model the
+    # server lists"; set it to pin one, e.g. VF_LOCAL_LLM_MODEL=qwen2.5:7b.
+    local_llm_url: str = "http://127.0.0.1:11434/v1"
+    local_llm_model: str = ""
 
     # ------------------------------------------------------------- knowledge
     chunk_target_chars: int = 900

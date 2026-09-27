@@ -25,7 +25,8 @@ async def chat(req: ChatRequest) -> Dict[str, Any]:
     return await orchestrator.ask(
         req.message, conversation_id=req.conversation_id, image_ids=req.image_ids,
         job_id=req.job_id, inspection_id=req.inspection_id, mode=req.mode,
-        web=req.web, profile=req.profile, allow_writes=req.allow_writes)
+        web=req.web, profile=req.profile, allow_writes=req.allow_writes,
+        attachments=[a.model_dump() for a in req.attachments])
 
 
 @router.post("/chat/stream")
@@ -38,6 +39,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 req.message, conversation_id=req.conversation_id, image_ids=req.image_ids,
                 job_id=req.job_id, inspection_id=req.inspection_id, mode=req.mode,
                 web=req.web, profile=req.profile, allow_writes=req.allow_writes,
+                attachments=[a.model_dump() for a in req.attachments],
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:  # the stream must close cleanly, always

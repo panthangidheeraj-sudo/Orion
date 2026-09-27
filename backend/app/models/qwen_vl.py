@@ -36,7 +36,7 @@ from app.models.runtime import model_dir, runtime_info
 
 log = get_logger(__name__)
 
-FALLBACK = "heuristic-offline reasoner"
+FALLBACK = "none — Orion will say it cannot interpret requests until a model runs"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
 _TOOL_BLOCK = re.compile(
@@ -206,10 +206,10 @@ class QwenVLGenAIProvider(ReasoningProvider):
 class LocalOpenAICompatProvider(ReasoningProvider):
     """OpenAI-shaped local server. Loopback only — a remote host is refused."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434/v1",
+    def __init__(self, base_url: Optional[str] = None,
                  model_id: Optional[str] = None, timeout_s: float = 120.0) -> None:
-        super().__init__(model_id or settings.reasoning_model_id, "local-openai-compat")
-        self.base_url = base_url.rstrip("/")
+        super().__init__(model_id or settings.local_llm_model or "auto", "local-openai-compat")
+        self.base_url = (base_url or settings.local_llm_url).rstrip("/")
         self.timeout_s = timeout_s
 
     def _load(self) -> None:
@@ -225,12 +225,23 @@ class LocalOpenAICompatProvider(ReasoningProvider):
         try:
             r = httpx.get(f"{self.base_url}/models", timeout=3.0)
             r.raise_for_status()
-            served = [m.get("id") for m in (r.json().get("data") or [])]
+            served = [m.get("id") for m in (r.json().get("data") or []) if m.get("id")]
         except Exception as exc:
             raise ModelUnavailable(
                 f"no local server at {self.base_url} ({type(exc).__name__})",
                 model=self.model_id, fallback=FALLBACK,
             )
+        chat_models = [m for m in served if "embed" not in m.lower()]
+        if self.model_id == "auto":
+            if not chat_models:
+                raise ModelUnavailable(
+                    f"the server at {self.base_url} lists no chat model — pull one first "
+                    "(e.g. `ollama pull qwen2.5:7b`)", model=self.model_id, fallback=FALLBACK)
+            self.model_id = chat_models[0]
+        elif served and self.model_id not in served:
+            raise ModelUnavailable(
+                f"'{self.model_id}' is not served at {self.base_url}; available: "
+                + ", ".join(served[:8]), model=self.model_id, fallback=FALLBACK)
         self._health = ModelHealth(
             role=self.role, provider=self.provider, model_id=self.model_id, status=READY,
             runtime="local-http", accelerator="unknown", npu=False,
@@ -242,7 +253,8 @@ class LocalOpenAICompatProvider(ReasoningProvider):
     def supports_streaming(self) -> bool:
         return True
 
-    def _payload(self, messages, images, tools, stream: bool) -> Dict[str, Any]:
+    def _payload(self, messages, images, tools, stream: bool,
+                 context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         msgs = [dict(m) for m in messages]
         if images:
             content: List[Dict[str, Any]] = [{"type": "text", "text": msgs[-1].get("content", "")}]
@@ -250,8 +262,18 @@ class LocalOpenAICompatProvider(ReasoningProvider):
                 content.append({"type": "image_url",
                                 "image_url": {"url": _image_data_url(ref)}})
             msgs[-1] = {"role": msgs[-1].get("role", "user"), "content": content}
+        ctx = context or {}
         body: Dict[str, Any] = {"model": self.model_id, "messages": msgs,
-                                "temperature": 0.2, "stream": stream}
+                                "temperature": ctx.get("temperature", 0.2), "stream": stream}
+        if ctx.get("max_tokens"):
+            body["max_tokens"] = ctx["max_tokens"]
+        if ctx.get("response_format"):
+            # Structured output: servers that support JSON-schema decoding
+            # (Ollama, llama.cpp, LM Studio) can then only emit the schema.
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "orion_" + str(ctx.get("purpose") or "output"),
+                                "schema": ctx["response_format"], "strict": True}}
         if tools:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
         return body
@@ -261,8 +283,13 @@ class LocalOpenAICompatProvider(ReasoningProvider):
         import httpx
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            r = await client.post(f"{self.base_url}/chat/completions",
-                                  json=self._payload(messages, images, tools, False))
+            body = self._payload(messages, images, tools, False, context)
+            r = await client.post(f"{self.base_url}/chat/completions", json=body)
+            if r.status_code == 400 and "response_format" in body:
+                # An older server without JSON-schema decoding: ask again without
+                # it. The caller still validates the output strictly.
+                body.pop("response_format")
+                r = await client.post(f"{self.base_url}/chat/completions", json=body)
             r.raise_for_status()
             data = r.json()
         choice = (data.get("choices") or [{}])[0].get("message", {}) or {}
@@ -284,7 +311,7 @@ class LocalOpenAICompatProvider(ReasoningProvider):
         buf: List[str] = []
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             async with client.stream("POST", f"{self.base_url}/chat/completions",
-                                     json=self._payload(messages, images, tools, True)) as resp:
+                                     json=self._payload(messages, images, tools, True, context)) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data:"):

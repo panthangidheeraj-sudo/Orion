@@ -130,8 +130,7 @@ async def metrics() -> Dict[str, Any]:
         "unavailable_metrics": {
             "npu_utilisation": "requires a Qualcomm AI Hub Workbench profile on the target device",
             "gpu_utilisation": "requires a platform profiler",
-            "tokens_per_second": "reported once a real VLM adapter is serving generation; "
-                                 "the offline stand-in generates no tokens",
+            "tokens_per_second": "not reported by the reasoning adapters yet",
         },
         "note": "Latency and host figures are measured by this process and reset when it "
                 "restarts. Nothing here is estimated — what cannot be measured is listed "
