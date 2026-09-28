@@ -43,7 +43,7 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
     : aiReady
       ? {
           key: 'ai', label: 'Local AI', state: 'ready', word: 'Ready',
-          detail: `${model!.model_id} on ${model!.accelerator.toUpperCase()}${model!.npu ? ' (NPU)' : ''}`,
+          detail: `${model!.model_id} · ${model!.provider} · ${model!.npu ? 'NPU' : model!.accelerator.toUpperCase()}`,
         }
       : {
           key: 'ai', label: 'Local AI', state: 'error', word: 'Unavailable',
@@ -53,7 +53,9 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
             ? 'No backend is reachable, so no local model is running.'
             : model?.synthetic
               ? `${model.model_id} is a deterministic stand-in, not a language model.`
-              : 'The backend reports no reasoning model loaded.',
+              : backend.modelReason
+                ? `No reasoning model loaded: ${backend.modelReason}`
+                : 'The backend reports no reasoning model loaded.',
         }
 
   const hasCamera = typeof navigator !== 'undefined'

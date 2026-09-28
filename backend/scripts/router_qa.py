@@ -6,8 +6,9 @@
 Runs the router QA set and the multi-turn transitions against a running
 backend and prints what the model decided for each. There is no special-case
 code behind any of these messages — every decision below comes from the
-configured reasoning model. Start a local model first (see README: "Running a
-local model"); without one every line reads `fallback`, which is correct.
+configured reasoning model — on the Snapdragon machine, Qwen3-VL-4B-Instruct
+through GenieX/QAIRT (docs/SNAPDRAGON_SETUP.md). Without a model every line
+reads `fallback`, which is correct.
 """
 
 from __future__ import annotations

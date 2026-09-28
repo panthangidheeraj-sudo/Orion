@@ -1,0 +1,15 @@
+# Orion on Windows on Snapdragon — Qwen3-VL-4B-Instruct via GenieX + QAIRT (NPU).
+#
+# Needs ARM64 Python 3.10+ on Windows (x64 Python is not supported by GenieX).
+# Install on top of the base requirements:
+#
+#     pip install -r requirements.txt
+#     pip install -r requirements-snapdragon.txt
+#
+# Then see docs/SNAPDRAGON_SETUP.md. This file is NOT used by the hosted
+# (Render) deployment, which has no NPU and reports reasoning as unavailable.
+#
+# geniex-qairt is the GenieX Python binding with only the QAIRT (NPU) plugin.
+# The full `geniex` distribution (llama.cpp + QAIRT) also works; the two are
+# mutually exclusive — install one. Do not install llama-cpp-python alongside.
+geniex-qairt>=0.7.0

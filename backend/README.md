@@ -64,19 +64,23 @@ model the reply is simply "I'm here. Tell me a little more about what you
 need." — while the independent safety gate still leads with getting safe if
 someone reports sparks, smoke or exposed conductors.
 
-### Running a local model
+### Running the real model: Qwen3-VL-4B-Instruct on the Snapdragon NPU
 
-Any OpenAI-compatible server on this machine works — Ollama, llama.cpp or
-LM Studio:
+Orion's reasoning model is **Qwen3-VL-4B-Instruct**, run in-process through
+Qualcomm **GenieX + QAIRT** on the Hexagon NPU (Snapdragon X Elite, X Plus
+8-Core, X2 Elite; Windows ARM64). One model does everything: the router,
+conversation, and the technical reasoning loop with photos.
 
-    ollama pull qwen2.5:7b          # or any chat model you prefer
-    ollama serve                    # listens on 127.0.0.1:11434
+    pip install -r requirements-snapdragon.txt        # ARM64 Python 3.10+
+    geniex pull ai-hub-models/Qwen3-VL-4B-Instruct
+    set VF_REASONING_PROVIDER=geniex-qwen3-vl
+    python scripts\geniex_smoke.py                    # proves it end to end
 
-Orion picks it up automatically (it re-checks every 20 s; no restart needed).
-Pin a model with `VF_LOCAL_LLM_MODEL=qwen2.5:7b`, or point elsewhere on this
-machine with `VF_LOCAL_LLM_URL`. Only loopback addresses are accepted.
-`python scripts/router_qa.py` then checks how that model routes a set of real
-messages and multi-turn transitions.
+Full steps, settings and troubleshooting: [docs/SNAPDRAGON_SETUP.md](docs/SNAPDRAGON_SETUP.md).
+The status only reports `accelerator: npu` once the model has loaded on the
+QAIRT plugin and a real generation has run there. With the provider selected
+explicitly, nothing else is ever substituted: if it cannot load, reasoning is
+reported unavailable with the reason.
 
 ---
 
@@ -344,16 +348,22 @@ rather than in the transport.
 If it says `cpu`, QNN was not applied and the honest claim is CPU. The log will
 say why. Nothing in the agent, the tools or the API changes.
 
-To point the reasoning role at a local model server instead (llama.cpp, Ollama,
-LM Studio), set `VF_REASONING_PROVIDER=local-openai-compat`. A non-loopback URL
-is refused.
+The reasoning role is Qwen3-VL-4B-Instruct through GenieX/QAIRT
+(`VF_REASONING_PROVIDER=geniex-qwen3-vl`, see docs/SNAPDRAGON_SETUP.md). A
+generic loopback OpenAI-compatible server is still selectable as
+`local-openai-compat`, but it is off unless `VF_LOCAL_LLM_URL` is set, and it
+reports `npu: false` because this process cannot verify what that server runs on.
 
 ---
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -q          # 104 unit and integration tests
+python -m pytest tests/ -q          # 125 unit and integration tests
+
+# On the Snapdragon machine, against the real Qwen3-VL-4B-Instruct (router QA + image reasoning):
+set ORION_GENIEX_TEST=1
+python -m pytest tests/test_geniex_hardware.py -v
 ```
 
 And against a running server, which is the one to use before a demo:

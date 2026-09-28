@@ -5,9 +5,9 @@
 # Creates a virtual environment on first run, installs the base dependencies
 # and starts the service on http://127.0.0.1:8756.
 #
-# Snapdragon note (§5): Qualcomm's current README says X Elite / X2 Elite
-# Windows users should use AMD64/x86-64 Python for qai_hub_models. Check the
-# current requirement before setting this machine up.
+# Snapdragon: the reasoning model (Qwen3-VL-4B-Instruct via GenieX + QAIRT)
+# needs ARM64 Python 3.10+ and requirements-snapdragon.txt — see
+# docs\SNAPDRAGON_SETUP.md.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

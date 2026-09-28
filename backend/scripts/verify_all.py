@@ -106,7 +106,7 @@ def _every_candidate_selectable():
     roles = client.get("/api/models/status").json()["roles"]
     tried = {k: {c["provider"] for c in v["candidates_tried"]} for k, v in roles.items()}
     expect = {
-        "reasoning": {"onnxruntime-genai", "local-openai-compat"},
+        "reasoning": {"geniex-qwen3-vl", "onnxruntime-genai", "local-openai-compat"},
         "detector": {"yolo-onnx", "yolo-world-onnx"},
         "classifier": {"efficientnet-onnx"},
         "segmenter": {"onnx-seg", "sam2-onnx", "mobilesam-onnx"},
@@ -116,6 +116,9 @@ def _every_candidate_selectable():
         "stt": {"whisper-onnx", "faster-whisper"},
         "tts": {"piper"},
     }
+    # A loaded or explicitly pinned reasoning model stops the walk early — by design.
+    if roles["reasoning"]["status"] == "ready" or len(tried["reasoning"]) == 1:
+        expect.pop("reasoning")
     for role, want in expect.items():
         assert want <= tried[role], f"{role} missing candidates: {want - tried[role]}"
     return f"{sum(len(v) for v in tried.values())} candidates across 9 roles"

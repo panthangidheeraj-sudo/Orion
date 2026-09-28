@@ -121,10 +121,27 @@ class Settings(BaseSettings):
     )
     qnn_backend_path: str = "QnnHtp.dll"
 
-    # A local OpenAI-compatible model server (Ollama, llama.cpp, LM Studio).
-    # Loopback only. An empty model name means "the first chat model the
-    # server lists"; set it to pin one, e.g. VF_LOCAL_LLM_MODEL=qwen2.5:7b.
-    local_llm_url: str = "http://127.0.0.1:11434/v1"
+    # Qwen3-VL-4B-Instruct through Qualcomm GenieX + QAIRT on the Snapdragon
+    # NPU (VF_REASONING_PROVIDER=geniex-qwen3-vl). See docs/SNAPDRAGON_SETUP.md.
+    geniex_model: str = "ai-hub-models/Qwen3-VL-4B-Instruct"
+    # Optional: load a bundle from this folder instead of the GenieX cache.
+    geniex_model_path: str = ""
+    # Optional AI Hub precision/quant tag; empty uses the bundle default.
+    geniex_precision: str = ""
+    # "qairt" forces the NPU plugin. Anything else is reported as what it is.
+    geniex_device_map: str = "qairt"
+    geniex_n_ctx: int = 0              # 0 = the bundle's context length
+    geniex_max_new_tokens: int = 768
+    geniex_max_images: int = 2
+    # Run a short generation at load; the provider is only READY if it works.
+    geniex_probe: bool = True
+    # Optional QAIRT SDK root to use instead of the runtime bundled with GenieX.
+    geniex_qairt_runtime_path: str = ""
+
+    # Any other OpenAI-compatible model server on this machine
+    # (VF_REASONING_PROVIDER=local-openai-compat). Loopback only, and off
+    # unless a URL is set — nothing is probed by default.
+    local_llm_url: str = ""
     local_llm_model: str = ""
 
     # ------------------------------------------------------------- knowledge

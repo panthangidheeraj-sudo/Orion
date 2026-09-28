@@ -33,11 +33,55 @@ curl http://127.0.0.1:8756/api/models/status
 
 ---
 
+## Reasoning on Snapdragon: Qwen3-VL-4B-Instruct via GenieX + QAIRT
+
+| | |
+|---|---|
+| Model | Qwen3-VL-4B-Instruct (`ai-hub-models/Qwen3-VL-4B-Instruct`, Apache-2.0) |
+| Runtime | Qualcomm GenieX, QAIRT plugin (Hexagon NPU), in-process Python API |
+| Supported chipsets (AI Hub) | Snapdragon X Elite, X Plus 8-Core, X2 Elite |
+| Host | Windows on Snapdragon, ARM64 Python 3.10+ |
+| Orion provider | `VF_REASONING_PROVIDER=geniex-qwen3-vl` (`app/models/geniex.py`) |
+| Used for | routing, conversation, technical reasoning, image + text |
+| Setup | [docs/SNAPDRAGON_SETUP.md](docs/SNAPDRAGON_SETUP.md) |
+
+**Validation status: NOT YET VALIDATED ON HARDWARE.** The provider, the
+smoke test and the real-model tests are written and their plumbing is tested
+against a stand-in of the GenieX API. Nothing here has run on a Snapdragon NPU
+yet. This section is to be filled in from `scripts/geniex_smoke_report.json`
+only after `python scripts\geniex_smoke.py` passes on the target machine.
+
+The provider becomes `ready` only after the model bundle loads and a probe
+generation produces tokens. `npu: true` requires the runtime to report the
+`qairt` plugin with device `NPU` for the model handle and for the probe, an NPU
+compute unit in the QAIRT device list, and QAIRT registered with libgeniex.
+
+### Validated result
+
+_Pending — fill from the smoke report:_
+
+| Field | Value |
+|---|---|
+| Date | |
+| Device / chipset | |
+| Windows build | |
+| Python | |
+| geniex / QAIRT plugin version | |
+| Model load time | |
+| Accelerator reported (`/api/models/status`) | |
+| Probe: prompt / generated tokens, decode tok/s | |
+| Text conversation | |
+| Image + text (red / blue) | |
+| Router checks | |
+| Smoke test | _/19 checks passed |
+
+---
+
 ## Role status
 
 | Role | Intended model (§3) | Adapter | Status in this build | Notes |
 |---|---|---|---|---|
-| Reasoning VLM | Qwen3-VL-2B-Instruct | `QwenVLGenAIProvider` (onnxruntime-genai), `LocalOpenAICompatProvider` | **Not exported** | Falls back to `HeuristicReasoningProvider`, reported as `synthetic: true`, `npu: false`. |
+| Reasoning VLM | **Qwen3-VL-4B-Instruct** (GenieX + QAIRT) | `GenieXQwen3VLProvider` (`geniex-qwen3-vl`); alternates `QwenVLGenAIProvider`, `LocalOpenAICompatProvider` | **Implemented — pending validation on the Snapdragon machine** | See "Reasoning on Snapdragon" below. With no model loaded there is no stand-in: reasoning is `unavailable` and Orion says it cannot interpret requests. |
 | Detection | YOLO11-Detection / YOLO-WORLD | `YoloOnnxDetector`, `YoloWorldDetector` | **Not exported** | Pre/post-processing is complete and real; drop an ONNX export into `data/models/yolov11_det/` and it runs. See the Compute caveat below. |
 | Classification | EfficientNet-B4 | `EfficientNetOnnxClassifier` | **Not exported** | §7's optional stage. Pre/post-processing complete (ImageNet normalisation, softmax, top-k, crop-to-bbox). Absent, the pipeline skips the stage rather than guessing a class. |
 | Segmentation | SAM2 / MobileSAM / YOLO11-Seg | `OnnxSegmenter` | **Not exported** | Session and prototype read-out implemented; mask assembly is finished against the exported head layout. |
@@ -54,7 +98,7 @@ configuration, not by editing code:
 
 | Role | Selectable providers |
 |---|---|
-| reasoning | `onnxruntime-genai`, `local-openai-compat` |
+| reasoning | `geniex-qwen3-vl`, `onnxruntime-genai`, `local-openai-compat` |
 | detector | `yolo-onnx`, `yolo-world-onnx` |
 | classifier | `efficientnet-onnx` |
 | segmenter | `onnx-seg`, `sam2-onnx`, `mobilesam-onnx` |
@@ -65,7 +109,8 @@ configuration, not by editing code:
 | tts | `piper` |
 
 Set `VF_<ROLE>_PROVIDER` to pin one, or leave it `auto` to take the first that
-actually loads. `/api/models/status` lists every candidate that was tried and
+actually loads. A pinned provider is the only one tried — if it cannot load,
+the role is unavailable; another model is never substituted. `/api/models/status` lists every candidate that was tried and
 why each one was skipped.
 
 ---

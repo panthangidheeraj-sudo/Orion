@@ -22,6 +22,7 @@ from app.models.base import (
     VisionSegmenter, VisionTracker,
 )
 from app.models.classification import EfficientNetOnnxClassifier
+from app.models.geniex import GenieXQwen3VLProvider
 from app.models.embeddings import LexicalHashEmbedder, NomicOnnxEmbedder
 from app.models.ocr import EasyOCRProvider, TrOCROnnxProvider
 from app.models.qwen_vl import LocalOpenAICompatProvider, QwenVLGenAIProvider
@@ -42,7 +43,12 @@ def _candidates() -> Dict[str, List[Candidate]]:
     # Real language models only. There is deliberately no rule-based stand-in:
     # with no model running, Orion says it can't interpret requests rather than
     # pretending to (app/agent/router.py).
+    #
+    # geniex-qwen3-vl is Qwen3-VL-4B-Instruct on the Snapdragon NPU through
+    # Qualcomm GenieX + QAIRT (app/models/geniex.py). On any machine without
+    # GenieX it reports unavailable in milliseconds, so it can lead the list.
     reasoning: List[Candidate] = [
+        ("geniex-qwen3-vl", GenieXQwen3VLProvider),
         ("onnxruntime-genai", QwenVLGenAIProvider),
         ("local-openai-compat", LocalOpenAICompatProvider),
     ]
@@ -111,9 +117,19 @@ class ModelRegistry:
     def _select(self, role: str) -> Adapter:
         pref = PREFERENCE[role]()
         options = _candidates()[role]
-        if pref and pref != "auto":
-            options = [o for o in options if o[0] == pref] or options
         attempts: List[Dict[str, Any]] = []
+        if pref and pref != "auto":
+            # An explicitly chosen provider is the only one tried: if it cannot
+            # run, the role is unavailable — never silently another model.
+            chosen = [o for o in options if o[0] == pref]
+            if not chosen:
+                self._attempts[role] = [{
+                    "provider": pref, "status": "error",
+                    "reason": f"unknown provider '{pref}'; known: "
+                              + ", ".join(o[0] for o in options)}]
+                log.warning("role=%s: unknown provider %r", role, pref)
+                return NULLS[role]()
+            options = chosen
         for name, factory in options:
             try:
                 adapter = factory()

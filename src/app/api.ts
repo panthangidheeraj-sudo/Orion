@@ -72,6 +72,8 @@ export interface BackendInfo {
   synthetic?: string[]
   npuClaim?: boolean
   reason?: string
+  /** Why the reasoning model is not running, as the backend reported it. */
+  modelReason?: string
 }
 
 /** What the user attached — metadata the backend's router weighs. */
@@ -134,6 +136,9 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
       unavailable: body?.summary?.unavailable ?? [],
       synthetic: body?.summary?.synthetic ?? [],
       npuClaim: Boolean(body?.summary?.npu_claim),
+      modelReason: reasoning && reasoning.status !== 'ready'
+        ? String(reasoning.candidates_tried?.[0]?.reason ?? reasoning.reason ?? '') || undefined
+        : undefined,
       model: reasoning
         ? {
             provider: reasoning.provider,

@@ -8,8 +8,8 @@ Two real local paths, both selected only when they are genuinely present:
     NPU on Windows through the QNN execution provider.
 
 ``LocalOpenAICompatProvider``
-    An OpenAI-shaped server running on **this machine** (llama.cpp, Ollama,
-    LM Studio).  The base URL is checked against the loopback interface and a
+    An OpenAI-shaped server running on **this machine**, only when
+    ``VF_LOCAL_LLM_URL`` is set.  The base URL is checked against the loopback interface and a
     non-local host is refused outright, because §24 forbids sending camera
     frames or documents off the device by default.
 
@@ -213,6 +213,10 @@ class LocalOpenAICompatProvider(ReasoningProvider):
         self.timeout_s = timeout_s
 
     def _load(self) -> None:
+        if not self.base_url:
+            raise ModelUnavailable(
+                "no local model server configured (VF_LOCAL_LLM_URL is empty)",
+                model=self.model_id, fallback=FALLBACK)
         host = (urlparse(self.base_url).hostname or "").lower()
         if host not in LOOPBACK_HOSTS:
             raise ModelUnavailable(
@@ -236,7 +240,7 @@ class LocalOpenAICompatProvider(ReasoningProvider):
             if not chat_models:
                 raise ModelUnavailable(
                     f"the server at {self.base_url} lists no chat model — pull one first "
-                    "(e.g. `ollama pull qwen2.5:7b`)", model=self.model_id, fallback=FALLBACK)
+                    "on that server first", model=self.model_id, fallback=FALLBACK)
             self.model_id = chat_models[0]
         elif served and self.model_id not in served:
             raise ModelUnavailable(
@@ -269,7 +273,7 @@ class LocalOpenAICompatProvider(ReasoningProvider):
             body["max_tokens"] = ctx["max_tokens"]
         if ctx.get("response_format"):
             # Structured output: servers that support JSON-schema decoding
-            # (Ollama, llama.cpp, LM Studio) can then only emit the schema.
+            # can then only emit the schema.
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "orion_" + str(ctx.get("purpose") or "output"),

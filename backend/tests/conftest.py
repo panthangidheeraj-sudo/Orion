@@ -6,6 +6,7 @@ knowledge vault, job history and memories are never touched.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -31,9 +32,12 @@ def isolated_data(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "access_token", "", raising=False)
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
     monkeypatch.setattr(settings, "heavy_rate_limit_per_minute", 0, raising=False)
-    # Never pick up a model server running on the developer's machine (Ollama
-    # on :11434): tests that need a model install the scripted double.
-    monkeypatch.setattr(settings, "local_llm_url", "http://127.0.0.1:9/v1", raising=False)
+    # Never pick up a model running on the developer's machine: tests that need
+    # a model install the scripted double. The GenieX hardware tests
+    # (ORION_GENIEX_TEST=1, tests/test_geniex_hardware.py) are the exception.
+    monkeypatch.setattr(settings, "local_llm_url", "", raising=False)
+    if os.environ.get("ORION_GENIEX_TEST") != "1":
+        monkeypatch.setitem(sys.modules, "geniex", None)
     limiter.hits.clear()
     settings.ensure_dirs()
     db.reset_connections()
