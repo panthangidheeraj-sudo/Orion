@@ -8,3 +8,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+qwen3_vl_4b_instruct_geniex_qairt_w4a16-qualcomm_snapdragon_x_elite/ 
+qwen3_vl_4b_instruct_geniex_qairt_w4a16-qualcomm_snapdragon_x_elite/ 
+backend\.venv-qai/ 
+backend/.venv-qai/ 
+qwen3_vl_4b_instruct-geniex_qairt-w4a16-qualcomm_snapdragon_x_elite/ 
