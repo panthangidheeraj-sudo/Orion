@@ -7,17 +7,20 @@ import {
   CabinetArt, CameraFrameArt, CircuitArt, CompressorArt, ControlPanelArt, CueIcon, DocPageArt, EyeArt,
   GearArt, MotorArt, PumpArt, ThumbBearingArt, ThumbLiveArt, ThumbNameplateArt, ThumbSealArt, WaveformArt,
 } from '../ui/aboutArt'
+import { EdgeMore, EdgeScene, SNAPDRAGON_LOGO } from './AboutEdge'
 import '../styles/about.css'
 
 /*
- * About — Orion's product story, told as nine scroll scenes.
+ * About — Orion's product story, told as scroll scenes. Section 6b (AboutEdge.tsx), between
+ * "Built for the field" and "Local by design", is the Qualcomm Snapdragon edge architecture:
+ * Qwen3-VL-4B-Instruct via GenieX + QAIRT.
  *
  * Every claim on this page maps to something the app actually does today:
  * photo and live-camera inspection, detector/OCR senses (reported honestly
  * when a model isn't installed), page-cited retrieval from your own manuals,
  * per-job memory that only keeps confirmed facts, answers split into what was
  * observed vs. inferred with safety notices, and a local-first engine with
- * web research off by default. Measurements such as temperature and
+ * web research that is on by default but always consulted last. Measurements such as temperature and
  * vibration come from the technician — Orion records and reasons over them;
  * it has no sensors of its own, and the copy says so.
  *
@@ -26,6 +29,42 @@ import '../styles/about.css'
  */
 
 type Vars = CSSProperties & Record<`--${string}`, string | number>
+
+/** Deterministic 0..1 noise, so every character gets its own stable path. */
+const noise = (i: number, seed: number) => {
+  const x = Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+
+/**
+ * Splits a line into per-character spans so CSS can move each letter on its
+ * own schedule. Screen readers get the whole line once (visually hidden
+ * copy); the animated letters are hidden from them.
+ *   --k  index within the line     --n  line length
+ *   --c  index across the headline (from + k), for page-wide staggering
+ *   --rx/--ry/--rr  per-letter scatter direction and spin
+ */
+function Chars({ text, from = 0 }: { text: string; from?: number }) {
+  const n = text.length
+  return (
+    <>
+      <span className="ab-vh">{text}</span>
+      <span className="ab-chars" aria-hidden="true">
+        {Array.from(text).map((ch, k) => {
+          const c = from + k
+          const rx = ((k + 0.5) / n - 0.5) * 1.5 + (noise(c, 1) - 0.5) * 0.7
+          const ry = (noise(c, 2) - 0.62) * 1.3
+          const rr = (noise(c, 3) - 0.5) * 160
+          return (
+            <span key={k} className="ab-ch" style={{ '--k': k, '--n': n, '--c': c, '--rx': rx.toFixed(3), '--ry': ry.toFixed(3), '--rr': rr.toFixed(1) } as Vars}>
+              {ch === ' ' ? '\u00a0' : ch}
+            </span>
+          )
+        })}
+      </span>
+    </>
+  )
+}
 
 /* ----------------------------------------------------------- content */
 
@@ -169,7 +208,7 @@ function LocalDiagram() {
       <g className="ab-arch-cloud">
         <rect x="690" y="24" width="190" height="64" rx="10" />
         <text x="785" y="52">WEB RESEARCH</text>
-        <text x="785" y="72" className="dim">off by default</text>
+        <text x="785" y="72" className="dim">consulted last</text>
         <path d="M690 56H560l-60 104" className="ab-arch-optional" />
       </g>
       {inputs.map((name, i) => (
@@ -210,7 +249,7 @@ function LocalDiagram() {
       <text x="20" y="410" className="ab-arch-device-t sm">YOUR MACHINE</text>
       <g className="ab-arch-cloud">
         <rect x="90" y="434" width="160" height="30" rx="8" />
-        <text x="170" y="454" className="sm">WEB · OFF BY DEFAULT</text>
+        <text x="170" y="454" className="sm">WEB · CONSULTED LAST</text>
       </g>
     </svg>
   )
@@ -233,6 +272,28 @@ export function About() {
       starTuning.speed = p < 0.72 ? 1 + 2.6 * (p / 0.72) : 3.6 - 3.3 * Math.min(1, (p - 0.72) / 0.28)
     },
   }), [])
+  // Field objects draw themselves in: every stroke gets pathLength="1" so CSS
+  // can run stroke-dashoffset 1 (hidden) → 0 (drawn). Dashes only measure
+  // correctly in the art's own units, so the drawings drop non-scaling-stroke
+  // (see about.css) and instead get a stroke width (--sw) worked out here to
+  // keep the same 1.4px on screen at any size.
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const svgs = Array.from(root.querySelectorAll<SVGSVGElement>('.ab-obj-art svg'))
+    svgs.forEach((svg) =>
+      svg.querySelectorAll('path, rect, circle, ellipse, line, polyline, polygon')
+        .forEach((el) => el.setAttribute('pathLength', '1')))
+    const fit = () => svgs.forEach((svg) => {
+      const w = (svg.parentElement as HTMLElement | null)?.offsetWidth ?? 0
+      const vb = svg.viewBox.baseVal?.width || w
+      if (w) svg.style.setProperty('--sw', (1.4 * vb / w).toFixed(4))
+    })
+    fit()
+    const ro = new ResizeObserver(fit)
+    svgs.forEach((svg) => svg.parentElement && ro.observe(svg.parentElement))
+    return () => ro.disconnect()
+  }, [])
   useSceneEngine(rootRef, listeners)
   useEffect(() => () => resetStarTuning(), [])
 
@@ -247,8 +308,11 @@ export function About() {
       <div className="ab" ref={rootRef}>
 
         {/* 1 — HERO */}
-        <section className="ab-scene ab-hero" data-scene="pin" style={{ '--len': 1.45 } as Vars} aria-labelledby="ab-hero-t">
+        <section className="ab-scene ab-hero" data-scene="pin" style={{ '--len': 3.8 } as Vars} aria-labelledby="ab-hero-t">
           <div className="ab-stage">
+            <div className="ab-warp" aria-hidden="true">
+              {[0, 1, 2, 3].map((k) => <i key={k} style={{ '--k': k } as Vars} />)}
+            </div>
             <div className="ab-hero-objects" aria-hidden="true">
               {HERO_OBJECTS.map(({ key, Art, ...o }, i) => (
                 <div
@@ -264,9 +328,9 @@ export function About() {
               <span className="ab-hero-mark ab-seq" style={{ '--i': 0 } as Vars}><MoonMark size={40} /></span>
               <p className="ab-hero-name ab-seq" style={{ '--i': 1 } as Vars}>Orion</p>
               <h1 id="ab-hero-t" className="ab-display ab-hero-title">
-                <span className="ab-seq ab-light" style={{ '--i': 2 } as Vars}>See.</span>
-                <span className="ab-seq" style={{ '--i': 3 } as Vars}>Understand.</span>
-                <span className="ab-seq ab-light" style={{ '--i': 4 } as Vars}>Act.</span>
+                <span className="ab-seq ab-light" style={{ '--i': 2 } as Vars}><Chars text="See." from={0} /></span>
+                <span className="ab-seq" style={{ '--i': 3 } as Vars}><Chars text="Understand." from={4} /></span>
+                <span className="ab-seq ab-light" style={{ '--i': 4 } as Vars}><Chars text="Act." from={15} /></span>
               </h1>
               <p className="ab-hero-sub ab-seq" style={{ '--i': 5 } as Vars}>
                 A multimodal field-technician assistant built to help you understand machines in context.
@@ -277,7 +341,7 @@ export function About() {
         </section>
 
         {/* 2 — THE MACHINE IS SPEAKING */}
-        <section className="ab-scene ab-machine" data-scene="pin" style={{ '--len': 2.6 } as Vars} aria-labelledby="ab-machine-t">
+        <section className="ab-scene ab-machine" data-scene="pin" style={{ '--len': 3.8 } as Vars} aria-labelledby="ab-machine-t">
           <div className="ab-stage">
             <div className="ab-machine-copy">
               <h2 id="ab-machine-t" className="ab-display ab-machine-title">
@@ -295,7 +359,7 @@ export function About() {
         </section>
 
         {/* 3 — ONE CONVERSATION. MANY SENSES. */}
-        <section className="ab-scene ab-senses" data-scene="pin" style={{ '--len': 2.8 } as Vars} aria-labelledby="ab-senses-t">
+        <section className="ab-scene ab-senses" data-scene="pin" style={{ '--len': 4 } as Vars} aria-labelledby="ab-senses-t">
           <div className="ab-stage">
             <h2 id="ab-senses-t" className="ab-display ab-senses-title">
               <span>One conversation.</span>
@@ -323,7 +387,7 @@ export function About() {
         </section>
 
         {/* 4 — THE PIPELINE */}
-        <section className="ab-scene ab-pipe" data-scene="pin" style={{ '--len': 3 } as Vars} aria-labelledby="ab-pipe-t">
+        <section className="ab-scene ab-pipe" data-scene="pin" style={{ '--len': 4.6 } as Vars} aria-labelledby="ab-pipe-t">
           <div className="ab-stage">
             <h2 id="ab-pipe-t" className="ab-vh">The pipeline: see, retrieve, reason, verify, guide</h2>
             <div className="ab-pipe-words" aria-hidden="true">
@@ -337,7 +401,7 @@ export function About() {
               </div>
             </div>
             <ol className="ab-flow">
-              <li className="ab-flow-rail" aria-hidden="true"><i className="ab-flow-fill" /><i className="ab-flow-dot" /></li>
+              <li className="ab-flow-rail" aria-hidden="true"><i className="ab-flow-fill" /><i className="ab-flow-track"><i className="ab-flow-dot" /></i></li>
               {FLOW.map((f, i) => (
                 <li key={f.title} className="ab-flow-node" style={{ '--at': i / 5 - 0.03, '--next': (i + 1) / 5 - 0.03 } as Vars}>
                   <span className="ab-flow-icon"><CueIcon name={f.icon} /></span>
@@ -350,7 +414,7 @@ export function About() {
         </section>
 
         {/* 5 — MEMORY */}
-        <section className="ab-scene ab-memory" data-scene="pin" style={{ '--len': 2.6 } as Vars} aria-labelledby="ab-memory-t">
+        <section className="ab-scene ab-memory" data-scene="pin" style={{ '--len': 4 } as Vars} aria-labelledby="ab-memory-t">
           <div className="ab-stage">
             <h2 id="ab-memory-t" className="ab-display ab-memory-title">
               <span>Every inspection</span>
@@ -382,7 +446,7 @@ export function About() {
         </section>
 
         {/* 6 — BUILT FOR THE FIELD */}
-        <section className="ab-scene ab-field" data-scene="pin" style={{ '--len': 4 } as Vars} aria-labelledby="ab-field-t">
+        <section className="ab-scene ab-field" data-scene="pin" style={{ '--len': 7 } as Vars} aria-labelledby="ab-field-t">
           <div className="ab-stage">
             <h2 id="ab-field-t" className="ab-display ab-field-title">
               <span>Built</span>
@@ -391,7 +455,8 @@ export function About() {
             <div className="ab-field-stage">
               {FIELD.map(({ key, name, Art, words }, i) => (
                 <figure key={key} className="ab-obj" style={{ '--i': i } as Vars}>
-                  <div className="ab-obj-art"><Art /></div>
+                  <span className="ab-display ab-obj-num" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+                  <div className="ab-obj-art"><Art /><i className="ab-obj-scan" aria-hidden="true" /></div>
                   <figcaption className="ab-obj-name"><span>{String(i + 1).padStart(2, '0')} / 05</span>{name}</figcaption>
                   <ul className="ab-obj-words" aria-label={`${name}: topics Orion can work through`}>
                     {words.map((w, j) => <li key={w} style={{ '--j': j } as Vars}>{w}</li>)}
@@ -399,12 +464,19 @@ export function About() {
                 </figure>
               ))}
             </div>
+            <div className="ab-field-progress" aria-hidden="true">
+              {FIELD.map((f, i) => <i key={f.key} style={{ '--i': i } as Vars} />)}
+            </div>
             <p className="ab-note ab-field-note">
               The faults Orion works through with you — from what you see, measure and describe. Where it can’t
               confirm something, it says so and asks for the reading.
             </p>
           </div>
         </section>
+
+        {/* 6b — BUILT FOR SNAPDRAGON: the edge architecture */}
+        <EdgeScene />
+        <EdgeMore />
 
         {/* 7 — LOCAL BY DESIGN */}
         <section className="ab-scene ab-local" data-scene="flow" aria-labelledby="ab-local-t">
@@ -415,8 +487,9 @@ export function About() {
           <div data-reveal style={{ '--i': 1 } as Vars}><LocalDiagram /></div>
           <p className="ab-note ab-local-note" data-reveal style={{ '--i': 2 } as Vars}>
             Orion’s engine is built to run on your own machine: documents, camera frames, audio and job memory
-            stay with it. Web research is off unless you switch it on, and even then it is the last place Orion
-            looks. Profile → System status shows what is actually running right now.
+            stay with it. Web research is on by default, but it is always the last place Orion looks — only when
+            your manuals and job memory come up short — and one switch in Settings turns it off. Profile → System
+            status shows what is actually running right now.
           </p>
         </section>
 
@@ -435,19 +508,30 @@ export function About() {
         </section>
 
         {/* 9 — ENDING */}
-        <section className="ab-scene ab-end" data-scene="pin" data-scene-id="ending" style={{ '--len': 1.7 } as Vars} aria-labelledby="ab-end-t">
+        <section className="ab-scene ab-end" data-scene="pin" data-scene-id="ending" style={{ '--len': 3.8 } as Vars} aria-labelledby="ab-end-t">
           <div className="ab-stage">
             <div className="ab-end-dark" aria-hidden="true" />
             <div className="ab-end-copy">
-              <span className="ab-end-mark" aria-hidden="true"><MoonMark size={56} /></span>
+              <span className="ab-end-markwrap" aria-hidden="true">
+                {[0, 1, 2].map((k) => <i key={k} className="ab-end-ring" style={{ '--k': k } as Vars} />)}
+                <span className="ab-end-mark"><MoonMark size={56} /></span>
+              </span>
               <h2 id="ab-end-t" className="ab-display ab-end-title">
-                <span>See clearer.</span>
-                <span className="ab-light">Work smarter.</span>
+                <span><Chars text="See clearer." /></span>
+                <span className="ab-light"><Chars text="Work smarter." /></span>
               </h2>
-              <p className="ab-end-name">Orion</p>
+              <p className="ab-end-name"><Chars text="Orion" /></p>
               <button type="button" className="ab-cta" onClick={start}>
-                <span>Start a conversation</span>
+                <i className="ab-cta-edge t" aria-hidden="true" />
+                <i className="ab-cta-edge b" aria-hidden="true" />
+                <i className="ab-cta-edge l" aria-hidden="true" />
+                <i className="ab-cta-edge r" aria-hidden="true" />
+                <span className="ab-cta-label">Start a conversation</span>
               </button>
+              <p className="ab-end-credit">
+                {SNAPDRAGON_LOGO && <img src={SNAPDRAGON_LOGO} alt="" aria-hidden="true" />}
+                <span>Designed for Qualcomm Snapdragon</span>
+              </p>
             </div>
           </div>
         </section>
