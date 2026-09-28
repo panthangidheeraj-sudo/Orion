@@ -77,6 +77,58 @@ _Pending — fill from the smoke report:_
 
 ---
 
+## Device Cloud remote validation (no Snapdragon hardware needed)
+
+A separate, hosted-only path validates the real model and the real
+QAIRT/NPU runtime on a physical, hosted Snapdragon device — without owning
+one — using Qualcomm AI Hub Workbench's Device Cloud. This does **not**
+change or substitute for `GenieXQwen3VLProvider` above; it validates the
+model and runtime on real Snapdragon silicon, at the granularity Qualcomm's
+current tooling actually supports (a compile → profile → inference job, not a
+live chat loop). Full steps: [docs/DEVICE_CLOUD_VALIDATION.md](docs/DEVICE_CLOUD_VALIDATION.md).
+
+**Status: NOT YET RUN.** This section is to be filled in from
+`scripts/aihub_devicecloud_report.json` and
+`scripts/aihub_router_text_image_report.json` only after both scripts have
+actually been run.
+
+### Hosted Device Cloud job (`scripts/aihub_devicecloud_validate.py`)
+
+_Pending — fill from `aihub_devicecloud_report.json`:_
+
+| Field | Value |
+|---|---|
+| Date | |
+| Requested device | |
+| Resolved device (name / OS / chipset attributes) | |
+| Compile job | |
+| Profile job — status, latency, peak memory | |
+| Inference job — status, accuracy vs. reference | |
+| Tool versions (QNN/QAIRT SDK) on the device | |
+| Job URLs | |
+
+This is the only evidence in this document that may back an NPU claim for
+the Device Cloud path — it comes from a real, physical Snapdragon device.
+
+### Text / image / router check (`scripts/aihub_router_text_image_check.py`)
+
+_Pending — fill from `aihub_router_text_image_report.json`. Every row here
+ran on this machine's own CPU/GPU (a local quantization-accuracy simulation
+of the real weights) — **never** report `npu: true` for this section:_
+
+| Field | Value |
+|---|---|
+| Date | |
+| Host (CPU/GPU) | |
+| Text conversation reply | |
+| Image + text reply | |
+| Router: hellooo -> | |
+| Router: my motor is vibrating -> | |
+| Router: there are sparks coming from the panel -> | |
+| Checks passed | _/N |
+
+---
+
 ## Role status
 
 | Role | Intended model (§3) | Adapter | Status in this build | Notes |

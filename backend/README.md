@@ -77,6 +77,12 @@ conversation, and the technical reasoning loop with photos.
     python scripts\geniex_smoke.py                    # proves it end to end
 
 Full steps, settings and troubleshooting: [docs/SNAPDRAGON_SETUP.md](docs/SNAPDRAGON_SETUP.md).
+
+No Snapdragon machine on hand yet? [docs/DEVICE_CLOUD_VALIDATION.md](docs/DEVICE_CLOUD_VALIDATION.md)
+validates the real model and the real QAIRT/NPU runtime on a physical,
+**hosted** Snapdragon device via Qualcomm AI Hub Workbench's Device Cloud —
+without owning one. It's a separate validation path; it doesn't change how
+Orion itself runs (`app/models/geniex.py` is untouched either way).
 The status only reports `accelerator: npu` once the model has loaded on the
 QAIRT plugin and a real generation has run there. With the provider selected
 explicitly, nothing else is ever substituted: if it cannot load, reasoning is
