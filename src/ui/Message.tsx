@@ -5,6 +5,7 @@ import { useStore } from '../app/store'
 import type { Message, Section, Step, VFile } from '../app/types'
 import { fmtClock } from '../app/util'
 import { FileChip } from './Composer'
+import { Markdown } from './Markdown'
 
 /** Splits into "word + trailing whitespace" chunks, so revealing a prefix of
  * the array and joining it always lands on a clean word boundary. */
@@ -61,21 +62,10 @@ export function UserMessage({ msg, files }: { msg: Message; files: VFile[] }) {
  * than empty elements, which keeps the rhythm even.
  */
 function Prose({ text, chat, cursor }: { text: string; chat: boolean; cursor?: ReactNode }) {
-  const lines = text.split('\n')
-  const paragraphs: { text: string; spaced: boolean }[] = []
-  let blankBefore = false
-  for (const line of lines) {
-    if (line.trim() === '') { blankBefore = paragraphs.length > 0; continue }
-    paragraphs.push({ text: line, spaced: blankBefore })
-    blankBefore = false
-  }
+  // Markdown (bold, lists, headings) is rendered, never shown as raw syntax.
   return (
     <div className={`prose${chat ? ' prose-chat' : ''}`}>
-      {paragraphs.map((p, i) => (
-        <p key={i} className={p.spaced ? 'spaced' : undefined}>
-          {p.text}{cursor && i === paragraphs.length - 1 ? cursor : null}
-        </p>
-      ))}
+      <Markdown text={text} cursor={cursor} />
     </div>
   )
 }
@@ -216,7 +206,7 @@ export function AssistantMessage({
               <span className="badge"><Icon name={m.icon} size={14} stroke={m.colour} width={1.8} /></span>
               <div className="body">
                 <Cap style={{ marginBottom: 6 }}>{m.label}</Cap>
-                <p>{r.text}{r.active && REVEAL_CURSOR}</p>
+                <Markdown text={r.text} cursor={r.active ? REVEAL_CURSOR : undefined} />
               </div>
             </section>
           )

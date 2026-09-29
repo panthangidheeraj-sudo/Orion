@@ -31,9 +31,12 @@ export function FileChip({ file, onRemove }: { file: VFile; onRemove?: () => voi
       <span className="meta">
         <span className="name">{file.name}</span>
         <span className="state" style={{ color: stateColour(file.state) }}>
-          {STATE_WORD[file.state]}{file.state === 'ready' && file.pages ? ` · ${file.pages} pages` : ''}
-          {file.state === 'ready' && !file.pages ? ` · ${fmtBytes(file.size)}` : ''}
+          {STATE_WORD[file.state]}{file.state === 'ready' && file.pages && file.kind !== 'image' ? ` · ${file.pages} pages` : ''}
+          {file.state === 'ready' && (!file.pages || file.kind === 'image') ? ` · ${fmtBytes(file.size)}` : ''}
         </span>
+        {file.state === 'failed' && file.note && (
+          <span className="reason" title={file.note}>{file.note}</span>
+        )}
       </span>
       {onRemove && (
         <button type="button" className="ibtn plain sm" aria-label={`Remove ${file.name}`} onClick={onRemove}>
@@ -129,8 +132,11 @@ export function Composer({
         <div className="notice error" style={{ margin: '0 6px 4px' }}>
           <Icon name="warn" size={18} stroke="var(--vf-danger)" width={1.8} />
           <div>
-            <div className="title">One file could not be read</div>
-            <div className="text">Export it as a PDF, PNG, JPG or TXT and attach it again.</div>
+            <div className="title">One file could not be attached</div>
+            <div className="text">
+              {attached.find((f) => f.state === 'failed')?.note
+                ?? 'Export it as a PDF, PNG, JPG or TXT and attach it again.'}
+            </div>
           </div>
         </div>
       )}

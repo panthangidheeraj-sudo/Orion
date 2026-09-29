@@ -259,13 +259,46 @@ export interface UploadedDocument {
   indexed: boolean
 }
 
+/** Turn a failed upload into a sentence the user can act on. The backend's own
+ * `reason` wins; otherwise the status says what happened. Never a bare "FAILED",
+ * and never a JSON parse error when a proxy answers with an HTML page. */
+async function uploadFailure(res: Response, what: string): Promise<Error> {
+  let reason = ''
+  try {
+    const body = await res.json()
+    reason = typeof body?.reason === 'string' ? body.reason : ''
+  } catch { /* not JSON (e.g. a gateway error page) */ }
+  if (reason) return new Error(reason)
+  const byStatus: Record<number, string> = {
+    401: 'the backend needs an access key — add it in Profile → System status',
+    403: 'the backend refused this request',
+    413: 'the file is larger than the backend accepts',
+    415: 'the backend cannot read this file type',
+    429: 'too many requests — wait a moment and try again',
+    502: 'the backend is starting up — try again in a few seconds',
+    503: 'the backend is starting up — try again in a few seconds',
+    504: 'the backend took too long to answer',
+  }
+  return new Error(`${what} failed: ${byStatus[res.status] ?? `HTTP ${res.status}`}`)
+}
+
+/** fetch() that explains a network-level failure (offline, blocked by CORS, wrong backend URL). */
+async function uploadFetch(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await apiFetch(path, init)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new Error('could not reach the Orion backend — check the connection and the backend URL')
+  }
+}
+
 /** Send a manual, datasheet or schematic into the local knowledge vault. */
 export async function uploadDocument(file: File, signal?: AbortSignal): Promise<UploadedDocument> {
   const form = new FormData()
   form.append('file', file, file.name)
-  const res = await apiFetch('/api/documents/upload', { method: 'POST', body: form, signal })
+  const res = await uploadFetch('/api/documents/upload', { method: 'POST', body: form, signal })
+  if (!res.ok) throw await uploadFailure(res, 'upload')
   const body = await res.json()
-  if (!res.ok) throw new Error(body?.reason || `upload failed (${res.status})`)
   return {
     documentId: body.document_id,
     filename: body.filename,
@@ -282,9 +315,9 @@ export async function uploadPhoto(blob: Blob, conversationId?: string): Promise<
   const form = new FormData()
   form.append('file', blob, 'frame.jpg')
   if (conversationId) form.append('conversation_id', conversationId)
-  const res = await apiFetch('/api/photo/upload', { method: 'POST', body: form })
+  const res = await uploadFetch('/api/photo/upload', { method: 'POST', body: form })
+  if (!res.ok) throw await uploadFailure(res, 'photo upload')
   const body = await res.json()
-  if (!res.ok) throw new Error(body?.reason || `photo upload failed (${res.status})`)
   return body.image_id as string
 }
 

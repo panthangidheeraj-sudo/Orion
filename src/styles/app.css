@@ -287,6 +287,7 @@ input, textarea { font: inherit; color: inherit; }
 .filechip .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .filechip .name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .filechip .state { font-family: var(--vf-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.filechip .reason { font-size: 11px; line-height: 1.35; color: var(--vf-text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ---------------------------------------------------------------- chat */
 .chat { flex: 1 1 auto; min-height: 0; display: flex; margin-top: 16px; }
@@ -405,14 +406,39 @@ input, textarea { font: inherit; color: inherit; }
 
 /* Prose in an assistant turn — a conversational reply, or any answer that came
    back as running text rather than sections. */
-.answer .prose p { margin: 0 0 6px; font-size: 13px; line-height: 1.48; color: var(--vf-text-2); }
-.answer .prose p:last-child { margin-bottom: 0; }
-.answer .prose p.spaced { margin-top: 9px; }
+/* Rendered Markdown (ui/Markdown.tsx). Hierarchy comes from spacing and from
+   text colour: the lead sentence, headings and bold terms are full-strength,
+   supporting detail is the softer text colour. Same font family, no cards. */
+.md { font-size: 14px; line-height: 1.62; color: var(--vf-text-2); overflow-wrap: anywhere; }
+.md > * { margin: 0; }
+.md > * + * { margin-top: 10px; }
+.md p.spaced { margin-top: 14px; }
+.md strong { font-weight: 650; color: var(--vf-text); }
+.md em { font-style: italic; }
+.md code {
+  font-family: var(--vf-mono); font-size: 0.88em; padding: 1px 5px; border-radius: 5px;
+  background: var(--vf-inset); border: 1px solid var(--vf-border); color: var(--vf-text);
+}
+.md > p:first-child { color: var(--vf-text); }
+.md .md-h {
+  margin-top: 20px; font-size: 14px; font-weight: 650; line-height: 1.35; color: var(--vf-text);
+  letter-spacing: 0.005em;
+}
+.md > .md-h:first-child { margin-top: 0; }
+.md .md-h + * { margin-top: 6px; }
+.md ul, .md ol { padding-left: 1.35em; }
+.md li { padding-left: 2px; }
+.md li + li { margin-top: 6px; }
+.md li.sub { margin-left: 1.1em; font-size: 0.96em; }
+.md ul { list-style: disc; }
+.md li::marker { color: var(--vf-muted); }
+.md ol > li::marker { font-family: var(--vf-mono); font-size: 0.86em; }
+.answer .prose { min-width: 0; }
 /* A greeting is a short exchange, not a report: tighten it up.
    NB the modifier is `prose-chat`, not `chat` — `.chat` is the chat screen's
    own flex layout, and reusing it here turned every paragraph into a column. */
 .answer .prose.prose-chat { margin-top: -4px; }
-.answer .prose.prose-chat p { color: var(--vf-text); }
+.answer .prose.prose-chat .md > p { color: var(--vf-text); }
 .aimark {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none;
   border-radius: 9px; background: linear-gradient(145deg, var(--vf-track), var(--vf-inset)); border: 1px solid var(--vf-border-strong);
@@ -426,7 +452,7 @@ input, textarea { font: inherit; color: inherit; }
 .section.observed .badge { background: rgba(67,217,163,0.11); border-color: rgba(67,217,163,0.3); }
 .section.inferred .badge { background: var(--vf-track); border-color: var(--vf-border-strong); }
 .section .body { flex: 1 1 auto; min-width: 0; }
-.section .body p { font-size: 13px; line-height: 1.46; }
+.section .body .md { font-size: 13.5px; line-height: 1.58; color: var(--vf-text); }
 .answer-foot { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--vf-border); }
 .memory {
   display: flex; align-items: center; gap: 7px; margin-bottom: 10px; padding: 7px 10px;

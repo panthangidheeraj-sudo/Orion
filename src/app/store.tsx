@@ -149,6 +149,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   backendRef.current = backend
   /** Conversation id on the backend, keyed by the local conversation id. */
   const remoteConvo = useRef<Record<string, string>>({})
+  /** The picked photos themselves, by file id. The page's Content-Security-Policy
+   * (rightly) does not allow fetch() of a blob: URL, so a photo cannot be read
+   * back from its preview URL — it is kept here and uploaded from this. */
+  const photoFiles = useRef<Map<string, File>>(new Map())
   const inFlight = useRef<AbortController | null>(null)
   const timers = useRef<number[]>([])
   const askTimers = useRef<number[]>([])
@@ -272,6 +276,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         note: supported ? undefined : 'Unsupported file type — export a PDF, PNG, JPG or TXT',
       }
     })
+    made.forEach((m, i) => { if (m.kind === 'image') photoFiles.current.set(m.id, incoming[i]) })
     setFiles((prev) => [...made, ...prev])
 
     const usable = made.filter((m) => m.state !== 'failed')
@@ -287,13 +292,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         void api
           .uploadDocument(source)
           .then((doc) => {
+            // A photo is not a document to be indexed: it is stored and then read by
+            // the AI as an image when the message is sent (uploadPhoto below). "No
+            // text extracted" is expected for it and is not a failure.
+            const okAsIs = doc.indexed || m.kind === 'image'
             patch({
-              state: doc.indexed ? 'ready' : 'failed',
+              state: okAsIs ? 'ready' : 'failed',
               progress: 100,
               pages: doc.pageCount,
               docId: doc.documentId,
               indexedChunks: doc.chunks,
-              note: doc.indexed
+              note: okAsIs
                 ? undefined
                 : 'Stored and viewable, but no text could be extracted — it may be a scan '
                   + 'that needs OCR',
@@ -331,6 +340,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setFiles((prev) => {
       const f = prev.find((x) => x.id === id)
       if (f?.url) URL.revokeObjectURL(f.url)
+      photoFiles.current.delete(id)
       return prev.filter((x) => x.id !== id)
     })
     setConversations((prev) => prev.map((c) => ({ ...c, fileIds: c.fileIds.filter((x) => x !== id) })))
@@ -427,11 +437,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // Photos go to the backend so the model can actually look at them.
         const imageIds: string[] = []
         for (const f of attachedFiles) {
-          if (f.kind !== 'image' || !f.url) continue
+          if (f.kind !== 'image') continue
+          const blob = photoFiles.current.get(f.id)
+          if (!blob) continue
           try {
-            const blob = await (await fetch(f.url)).blob()
             imageIds.push(await api.uploadPhoto(blob, remoteConvo.current[convoId]))
-          } catch { /* the router still knows an image was attached */ }
+          } catch (err) {
+            // Say why the model will not see this photo instead of dropping it silently.
+            toast(
+              `Photo not sent: ${f.name}`,
+              err instanceof Error ? err.message : 'The backend did not accept the image.',
+            )
+          }
         }
         const res = await api.ask(text, {
           conversationId: remoteConvo.current[convoId],
