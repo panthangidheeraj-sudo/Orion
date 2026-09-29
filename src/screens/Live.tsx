@@ -342,11 +342,11 @@ export function Live() {
         pulse(0.6)
         setLines((prev) => [...prev.filter((l) => !l.live), { who: 'You', text, live: true } as Line].slice(-6))
       },
-      onFinal: (text) => {
+      onFinal: (text, why) => {
         rec.current = null
         setLines((prev) => prev.filter((l) => !l.live))
         if (!text) {
-          setVoiceNote(recognitionErrorText('no-speech'))
+          setVoiceNote(why ?? recognitionErrorText('no-speech'))
           setVoiceState('idle')
           return
         }
