@@ -123,7 +123,8 @@ export interface OneShot {
  */
 export function listenOnce(handlers: {
   onInterim: (text: string) => void
-  onFinal: (text: string) => void
+  /** `why` explains an empty result from the events the recognizer actually fired. */
+  onFinal: (text: string, why?: string) => void
   onError: (code: string) => void
 }): OneShot | null {
   const C = ctor()
@@ -137,10 +138,32 @@ export function listenOnce(handlers: {
   let interimText = ''
   let aborted = false
   let done = false
+  let stoppedByUser = false
+  // Which recognizer events really fired, so an empty result can say why.
+  const seen = new Set<string>()
+  let lastError = ''
+  const note = (ev: string) => {
+    if (!seen.has(ev) && typeof console !== 'undefined') console.info(`[orion-voice] ${ev}`)
+    seen.add(ev)
+  }
+  const r = rec as unknown as Record<string, unknown>
+  for (const ev of ['start', 'audiostart', 'soundstart', 'speechstart', 'speechend', 'soundend', 'audioend', 'nomatch']) {
+    r[`on${ev}`] = () => note(ev)
+  }
+  const explain = (): string => {
+    if (lastError === 'aborted' && !stoppedByUser) return 'Speech recognition was interrupted by the browser before it heard anything. Press the microphone and try again.'
+    if (!seen.has('audiostart')) return 'The browser never started capturing audio from the microphone. Check which microphone Chrome is using (Settings → Privacy and security → Site settings → Microphone) and that no other app holds it.'
+    if (!seen.has('soundstart')) return 'The microphone is on but only sent silence. Chrome may be using a different or muted input device — pick the right microphone in Chrome’s site settings.'
+    if (!seen.has('speechstart')) return 'Sound was picked up but no speech was recognised. Speak closer to the microphone and try again.'
+    return 'Speech was heard but the recognizer returned no words. Try again, speaking a full sentence.'
+  }
   const finish = () => {
     if (done) return
     done = true
-    if (!aborted) handlers.onFinal((finalText || interimText).trim())
+    note('end')
+    if (aborted) return
+    const text = (finalText || interimText).trim()
+    handlers.onFinal(text, text ? undefined : explain())
   }
   rec.onresult = (e: any) => {
     let fin = ''
@@ -152,18 +175,23 @@ export function listenOnce(handlers: {
     }
     finalText = fin
     interimText = interim
+    note('result')
     handlers.onInterim(`${fin}${interim}`.trim())
   }
   rec.onerror = (e: any) => {
     const code = String(e?.error ?? 'error')
-    // "aborted" is our own abort(); "no-speech" still ends with an empty final.
-    if (code === 'aborted') return
-    if (code !== 'no-speech') { aborted = true; done = true; handlers.onError(code) }
+    lastError = code
+    note(`error:${code}`)
+    // "aborted" and "no-speech" end with an empty final, explained from the events seen.
+    if (code === 'aborted' || code === 'no-speech') return
+    aborted = true
+    done = true
+    handlers.onError(code)
   }
   rec.onend = finish
   try { rec.start() } catch { handlers.onError('start-failed'); return null }
   return {
-    stop: () => { try { rec.stop() } catch { finish() } },
+    stop: () => { stoppedByUser = true; try { rec.stop() } catch { finish() } },
     abort: () => { aborted = true; done = true; try { rec.abort() } catch { /* already ended */ } },
   }
 }
