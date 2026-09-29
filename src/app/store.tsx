@@ -10,6 +10,28 @@ const K = {
   profile: 'vf.profile',
   access: 'vf.access',
   prefs: 'vf.prefs',
+  webOnMigrated: 'vf.migrate.web-on-default',
+}
+
+/**
+ * Web research became on-by-default. Prefs are saved in full on first run,
+ * so every browser that opened Orion before that change has the OLD default
+ * (webSearch: false) stored and would never see the new one. Flip it on once
+ * for those browsers; from then on the Settings switch is the only thing that
+ * changes it. Idempotent — safe under StrictMode's double initialiser calls.
+ */
+function migrateWebOnDefault() {
+  try {
+    if (localStorage.getItem(K.webOnMigrated)) return
+    const raw = localStorage.getItem(K.prefs)
+    if (raw) {
+      const stored = JSON.parse(raw) as Partial<Prefs>
+      localStorage.setItem(K.prefs, JSON.stringify({ ...stored, webSearch: true }))
+    }
+    localStorage.setItem(K.webOnMigrated, '1')
+  } catch {
+    /* storage blocked: DEFAULT_PREFS (web on) already applies */
+  }
 }
 
 export interface Toast { id: string; title: string; detail?: string }
@@ -87,6 +109,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // in Settings, which persists to localStorage from that point on.
     // load() already falls back to the defaults when storage is empty or
     // blocked (private mode, disabled site data) instead of throwing.
+    migrateWebOnDefault()
     return { ...load(K.prefs, DEFAULT_PREFS) }
   })
   const [route, setRoute] = useState<Route>(() => (load(K.prefs, DEFAULT_PREFS).onboarded ? 'home' : 'onboarding'))

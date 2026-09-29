@@ -18,7 +18,7 @@ export function Onboarding() {
     {
       title: 'A second technician, on your device',
       copy: 'Orion looks at the equipment with you, reads your manuals, and reasons through the fault the way an experienced colleague would. No cloud, no account.',
-      points: ['Built to run on the device’s NPU', 'Works with no signal', 'Built local-first'],
+      points: ['Designed for the Qualcomm Snapdragon NPU', 'Works with no signal', 'Built local-first'],
     },
     {
       title: 'Describe it, or show it',

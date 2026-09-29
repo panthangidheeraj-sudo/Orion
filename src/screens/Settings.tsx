@@ -118,7 +118,7 @@ export function Settings() {
         >
           <Switch on={prefs.reduceMotion} label="Reduce motion" onChange={(v) => setPrefs({ ...prefs, reduceMotion: v })} />
         </SettingRow>
-        <SettingRow title="Web search" detail="Off by default — answers come from your manuals and history">
+        <SettingRow title="Web search" detail="On by default — used only after your manuals and history come up short">
           <Switch on={prefs.webSearch} label="Web search" onChange={(v) => setPrefs({ ...prefs, webSearch: v })} />
         </SettingRow>
       </>

@@ -54,7 +54,15 @@ export default defineConfig(({ mode }) => {
     // interface (host: true), exposing the dev server — and the Vite dev-server
     // file-access bugs — to anyone on the same Wi-Fi. To test on a phone,
     // opt in for that session: `npm run dev -- --host`.
-    server: { host: 'localhost', port: 5173 },
+    server: {
+      host: 'localhost',
+      port: 5173,
+      // /api/* is proxied server-side to the backend, so in dev the browser
+      // only ever talks to its own origin (http://localhost:5173) — never a
+      // direct cross-origin request to 127.0.0.1:8756. api.ts's BACKEND_BASE
+      // is '' in dev for exactly this reason; the two must stay in agreement.
+      proxy: { '/api': { target: backend, changeOrigin: true } },
+    },
     build: { target: 'es2020', outDir: 'dist', sourcemap: false },
   }
 })

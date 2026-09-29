@@ -54,7 +54,9 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
             : model?.synthetic
               ? `${model.model_id} is a deterministic stand-in, not a language model.`
               : backend.modelReason
-                ? `No reasoning model loaded: ${backend.modelReason}`
+                // Verbatim from /api/models/status — e.g. "asset installed, but local
+                // GenieX/QAIRT NPU execution requires a Windows ARM64 Snapdragon machine".
+                ? `${model?.model_id && model.model_id !== 'none' ? `${model.model_id} not running: ` : 'No reasoning model loaded: '}${backend.modelReason}`
                 : 'The backend reports no reasoning model loaded.',
         }
 

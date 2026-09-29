@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-interface Star { a: number; r: number; v: number; s: number; t: string; o: number }
+interface Star { a: number; r: number; v: number; s: number; o: number }
 
 /**
  * Live controls a screen can nudge (the About page's ending uses them).
@@ -33,7 +33,12 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
     // (see store.tsx), so honouring it here honours the system too.
     const prefersReduced = reduceMotion
 
-    const tints = ['255,255,255', '240,243,247', '222,228,236', '255,252,246']
+    // Each star keeps a fixed tint by slot (i % tints.length), so a frame sets
+    // fillStyle once per tint and varies only globalAlpha (a plain number) per
+    // star — instead of building and parsing ~1000 rgba() strings per frame,
+    // which competed with the About page's scroll frames for the main thread.
+    const tints = ['rgb(255,255,255)', 'rgb(240,243,247)', 'rgb(222,228,236)', 'rgb(255,252,246)']
+    const T = tints.length
     let stars: Star[] = []
     let w = 0
     let h = 0
@@ -62,7 +67,6 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
       s.v = R * (0.055 + Math.random() * 0.085)
       // Mostly hard one-pixel points, with a scattering of brighter, bigger ones.
       s.s = Math.random() < 0.82 ? 0.34 + Math.random() * 0.5 : 0.95 + Math.random() * 0.85
-      s.t = tints[(Math.random() * tints.length) | 0]
       s.o = 0.58 + Math.random() * 0.42
       return s
     }
@@ -92,35 +96,39 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
         density += (starTuning.density - density) * k
       }
       const shown = Math.round(stars.length * Math.max(0, Math.min(1, density)))
-      for (let i = 0; i < stars.length; i++) {
-        const s = stars[i]
-        if (dt) s.r -= s.v * dt * speed
-        if (i >= shown) { if (s.r < R * 0.05) place(s, false); continue }
-        if (s.r < R * 0.05) place(s, false)
-        const q = s.r / R
-        const x = cx + Math.cos(s.a) * s.r
-        const y = cy + Math.sin(s.a) * s.r
-        const p = 1 - Math.min(1, q)
-        const rad = s.s * (0.62 + p * 0.55)
-        // A long dissolve into the vanishing point. Constant speed concentrates
-        // the field toward the centre (density goes as 1/r); fading over the
-        // inner third thins exactly the area the headline and composer sit in.
-        const inner = Math.max(0, Math.min(1, (q - 0.05) / 0.3))
-        const outer = Math.max(0, Math.min(1, (1.2 - q) / 0.14))
-        const alpha = Math.min(1, s.o * (0.55 + p * 0.8) * inner * outer)
-        if (alpha <= 0.004) continue
-        ctx.fillStyle = `rgba(${s.t},${alpha.toFixed(3)})`
-        if (rad <= 0.9) {
-          // A crisp square of whole device pixels reads as a point of light;
-          // a sub-pixel arc reads as a grey blur.
-          const side = Math.max(1, Math.round(rad * 2 * dpr)) * px
-          ctx.fillRect(snap(x), snap(y), side, side)
-        } else {
-          ctx.beginPath()
-          ctx.arc(snap(x) + px / 2, snap(y) + px / 2, rad, 0, 6.2832)
-          ctx.fill()
+      for (let g = 0; g < T; g++) {
+        ctx.fillStyle = tints[g]
+        for (let i = g; i < stars.length; i += T) {
+          const s = stars[i]
+          if (dt) s.r -= s.v * dt * speed
+          if (i >= shown) { if (s.r < R * 0.05) place(s, false); continue }
+          if (s.r < R * 0.05) place(s, false)
+          const q = s.r / R
+          const x = cx + Math.cos(s.a) * s.r
+          const y = cy + Math.sin(s.a) * s.r
+          const p = 1 - Math.min(1, q)
+          const rad = s.s * (0.62 + p * 0.55)
+          // A long dissolve into the vanishing point. Constant speed concentrates
+          // the field toward the centre (density goes as 1/r); fading over the
+          // inner third thins exactly the area the headline and composer sit in.
+          const inner = Math.max(0, Math.min(1, (q - 0.05) / 0.3))
+          const outer = Math.max(0, Math.min(1, (1.2 - q) / 0.14))
+          const alpha = Math.min(1, s.o * (0.55 + p * 0.8) * inner * outer)
+          if (alpha <= 0.004) continue
+          ctx.globalAlpha = alpha
+          if (rad <= 0.9) {
+            // A crisp square of whole device pixels reads as a point of light;
+            // a sub-pixel arc reads as a grey blur.
+            const side = Math.max(1, Math.round(rad * 2 * dpr)) * px
+            ctx.fillRect(snap(x), snap(y), side, side)
+          } else {
+            ctx.beginPath()
+            ctx.arc(snap(x) + px / 2, snap(y) + px / 2, rad, 0, 6.2832)
+            ctx.fill()
+          }
         }
       }
+      ctx.globalAlpha = 1
     }
 
     const loop = (ts: number) => {

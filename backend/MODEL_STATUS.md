@@ -45,6 +45,16 @@ curl http://127.0.0.1:8756/api/models/status
 | Used for | routing, conversation, technical reasoning, image + text |
 | Setup | [docs/SNAPDRAGON_SETUP.md](docs/SNAPDRAGON_SETUP.md) |
 
+**Asset on disk (not a validation).** The Qualcomm AI Hub Models export
+`qwen3_vl_4b_instruct-geniex_qairt-w4a16-qualcomm_snapdragon_x_elite` has been
+downloaded: runtime `geniex_qairt`, precision `w4a16`, QAIRT 2.45.0, built for
+Snapdragon X Elite (reference device Snapdragon X Elite CRD, `soc_model` 60,
+HTP v73) — per its own `metadata.json`. Orion is wired to it with
+`VF_GENIEX_MODEL_PATH`. The development PC runs x64 Python 3.12.10 (its packages are
+`win_amd64` builds) on an Intel machine, where GenieX has no native runtime, so the provider there correctly reports:
+*asset installed, but local GenieX/QAIRT NPU execution requires a Windows
+ARM64 Snapdragon machine.* Nothing below may be filled in from that machine.
+
 **Validation status: NOT YET VALIDATED ON HARDWARE.** The provider, the
 smoke test and the real-model tests are written and their plumbing is tested
 against a stand-in of the GenieX API. Nothing here has run on a Snapdragon NPU

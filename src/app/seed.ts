@@ -17,7 +17,7 @@ export const DEFAULT_ACCESS: Access = {
 
 export const DEFAULT_PREFS: Prefs = {
   reduceMotion: false,
-  webSearch: false,
+  webSearch: true,
   onboarded: false,
 }
 

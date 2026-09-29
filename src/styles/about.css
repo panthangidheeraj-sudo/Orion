@@ -25,15 +25,34 @@
   /* Plain alpha, no blend mode: a full-screen blended layer made every
      scrolled frame re-composite the whole page. */
   position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: 0.035;
+  transform: translateZ(0);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 .ab-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
 /* ------------------------------------------------------------ scenes */
+/* Registered as numbers: every scroll frame rewrites these on each visible
+   scene, and a typed value resolves in calc() without re-parsing tokens. */
+@property --p { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --e { syntax: '<number>'; inherits: true; initial-value: 0; }
+/* Derived progress values that whole subtrees read (a field object's SVG art
+   reads --draw on every stroke). Registered, they are computed once where
+   they're declared and inherited as plain numbers, instead of every stroke
+   re-evaluating the nested clamp()/calc() chain each frame. */
+@property --in { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --out { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --q { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --in1 { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --out1 { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --draw { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --scan { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --hold { syntax: '<number>'; inherits: true; initial-value: 0; }
 .ab-scene { position: relative; --p: 0; --e: 0; }
 .ab-scene[data-scene='pin'] { height: calc(var(--len, 2) * 100cqh); }
 .ab-stage {
   position: sticky; top: 0; height: 100cqh; overflow: hidden;
+  /* Layout/paint inside a stage never invalidates anything outside it. */
+  contain: layout paint;
   /* A scene's opening content arrives while it slides into view (--e), and
      it leaves by scrolling away — scenes hand over to each other with no
      empty screen in between. */
@@ -65,14 +84,28 @@
 
 /* ------------------------------------------------ 1. HERO */
 .ab-hero .ab-stage { display: grid; place-items: center; }
+/* Hero, in beats (p = 0 → 1 over the pinned scroll):
+     0.00–0.20  sub-line lifts away, ORION fades, the moon spins up and out
+     0.05–0.45  SEE. / ACT. slide apart, UNDERSTAND. swells
+     0.34–0.80  the headline breaks apart letter by letter, each on its own path
+     0.25–0.95  the floating objects fly past the camera
+     0.50–1.00  warp rings rush outward into the next scene */
 .ab-hero-copy {
   position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center;
   gap: clamp(10px, 2cqh, 20px); padding: 0 20px; text-align: center;
-  transform: translateY(calc(var(--p) * -10cqh));
-  opacity: calc(1 - var(--p) * 0.85);
+  transform: translateY(calc(var(--p) * -4cqh));
+  will-change: transform;
 }
-.ab-hero-mark { display: block; filter: drop-shadow(0 0 16px rgba(var(--ab-glow), 0.35)); }
+.ab-hero-mark {
+  display: block; filter: drop-shadow(0 0 16px rgba(var(--ab-glow), 0.35));
+  --m: clamp(0, calc(var(--p) / 0.3), 1);
+  transform: translateY(calc(var(--m) * -4cqh)) rotate(calc(var(--m) * 160deg)) scale(calc(1 - 0.35 * var(--m)));
+  opacity: calc(1 - clamp(0, calc((var(--p) - 0.18) / 0.14), 1));
+  will-change: transform, opacity;
+}
 .ab-hero-name {
+  --m: clamp(0, calc((var(--p) - 0.04) / 0.14), 1);
+  opacity: calc(1 - var(--m)); transform: translateY(calc(var(--m) * -14px)); will-change: transform, opacity;
   margin: 0; font-family: var(--vf-mono); font-weight: 500; font-size: clamp(12px, 1.3cqw, 15px);
   letter-spacing: 0.9em; margin-right: -0.9em; /* optically re-centre the tracked word */
   text-transform: uppercase; color: rgba(242, 243, 244, 0.78);
@@ -82,21 +115,56 @@
 .ab-hero-title > span:nth-child(1) { transform: translateX(calc(var(--p) * -16cqw)); }
 .ab-hero-title > span:nth-child(3) { transform: translateX(calc(var(--p) * 16cqw)); }
 .ab-hero-title > span:nth-child(2) { transform: scale(calc(1 + var(--p) * 0.08)); }
-.ab-hero-sub { max-width: 34ch; margin: 6px 0 0; font-size: clamp(13.5px, 1.25cqw, 16px); line-height: 1.6; color: rgba(242, 243, 244, 0.6); }
+.ab-hero-sub {
+  max-width: 34ch; margin: 6px 0 0; font-size: clamp(13.5px, 1.25cqw, 16px); line-height: 1.6; color: rgba(242, 243, 244, 0.6);
+  --m: clamp(0, calc(var(--p) / 0.18), 1);
+  opacity: calc(1 - var(--m)); transform: translateY(calc(var(--m) * -26px)); will-change: transform, opacity;
+}
 
-.ab-seq { animation: ab-enter 1100ms var(--ab-ease) both; animation-delay: calc(250ms + var(--i) * 300ms); }
+/* Per-letter spans (see <Chars> in About.tsx). A line never wraps mid-word. */
+.ab-chars { white-space: nowrap; }
+.ab-ch { display: inline-block; will-change: transform, opacity; }
+.ab-hero .ab-ch {
+  --s: clamp(0, calc((var(--p) - 0.34 - var(--c) * 0.016) / 0.28), 1);
+  opacity: calc(1 - var(--s));
+  transform:
+    translate(calc(var(--rx) * var(--s) * 34cqw), calc(var(--ry) * var(--s) * 40cqh))
+    rotate(calc(var(--rr) * var(--s) * 1deg))
+    scale(calc(1 + var(--s) * 0.7));
+}
+
+.ab-warp { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.ab-warp i {
+  position: absolute; left: 50%; top: 50%; width: 40cqmin; height: 40cqmin; margin: -20cqmin 0 0 -20cqmin;
+  border-radius: 50%; border: 1px solid rgba(var(--ab-glow), 0.55);
+  box-shadow: 0 0 30px rgba(var(--ab-glow), 0.18), inset 0 0 30px rgba(var(--ab-glow), 0.12);
+  --w: clamp(0, calc((var(--p) - 0.5 - var(--k) * 0.09) / 0.32), 1);
+  transform: scale(calc(0.12 + var(--w) * 4.2));
+  opacity: calc(min(var(--w) * 5, 1 - var(--w)) * 0.8);
+  will-change: transform, opacity;
+}
+
+/* `backwards`, not `both`: once the entrance ends it must stop holding
+   opacity at 1, or the scroll-driven fades below could never take over. */
+.ab-seq { animation: ab-enter 1100ms var(--ab-ease) backwards; animation-delay: calc(250ms + var(--i) * 300ms); }
 @keyframes ab-enter {
   from { opacity: 0; scale: 0.96; translate: 0 16px; filter: blur(8px); }
   to { opacity: 1; scale: 1; translate: 0 0; filter: blur(0); }
 }
 
-.ab-hero-objects { position: absolute; inset: 0; z-index: 1; opacity: calc(1 - var(--p) * 0.9); }
+.ab-hero-objects { position: absolute; inset: 0; z-index: 1; opacity: calc(1 - clamp(0, calc((var(--p) - 0.5) / 0.4), 1)); will-change: opacity; }
 .ab-float {
   position: absolute; left: calc(var(--x) * 1%); top: calc(var(--y) * 1%);
   width: calc(var(--s) * clamp(40px, 5.4cqw, 82px)); color: rgba(242, 243, 244, 0.5);
-  transform: translate(-50%, -50%) translate(calc(var(--dx) * var(--p) * 24cqw), calc(var(--dy) * var(--p) * 22cqh));
+  /* Flies outward past the camera: drifts, turns, and grows as it nears. */
+  --f: clamp(0, calc((var(--p) - 0.1) / 0.8), 1);
+  transform: translate(-50%, -50%)
+    translate(calc(var(--dx) * var(--f) * 34cqw), calc(var(--dy) * var(--f) * 30cqh))
+    rotate(calc(var(--dx) * var(--f) * 50deg))
+    scale(calc(1 + var(--f) * var(--f) * 2.2));
   animation: ab-appear 1600ms var(--ab-ease) both, ab-drift-a 13s ease-in-out infinite;
   animation-delay: calc(1900ms + var(--i) * 140ms), calc(var(--i) * -1.7s);
+  will-change: transform;
 }
 .ab-float svg { display: block; width: 100%; height: auto; overflow: visible; }
 .ab-float.ab-drift-b { animation-name: ab-appear, ab-drift-b; animation-duration: 1600ms, 16s; }
@@ -124,6 +192,7 @@
   font-size: clamp(52px, min(12.5cqw, 20cqh), 210px); font-weight: 760;
   opacity: calc(var(--in) * (1 - 0.8 * var(--lit)) * (1 - var(--out)));
   transform: translateY(calc((1 - var(--in)) * 6cqh)) scale(calc(1 + 0.05 * var(--lit)));
+  will-change: transform, opacity;
 }
 .ab-machine-sub {
   position: absolute; left: 0; right: 0; bottom: clamp(36px, 9cqh, 90px);
@@ -139,6 +208,7 @@
   translate: -50% -50%;
   opacity: calc(clamp(0, calc((var(--p) - 0.04) / 0.14), 1) * (1 - var(--out)));
   transform: scale(calc(0.94 + 0.06 * clamp(0, calc((var(--p) - 0.04) / 0.2), 1)));
+  will-change: transform, opacity;
 }
 .ab-rig-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .ab-rig-lines g { --d: clamp(0, calc((var(--p) - var(--at)) / 0.12), 1); }
@@ -161,6 +231,7 @@
   width: 100%; height: 100%;
   transform: rotateY(calc((var(--p) - 0.5) * 34deg)) translateY(calc((0.5 - var(--p)) * 5cqh));
   filter: drop-shadow(0 0 22px rgba(var(--ab-glow), 0.22));
+  will-change: transform;
 }
 .ab-rig-turn svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .ab-signal {
@@ -169,6 +240,7 @@
   --d: clamp(0, calc((var(--p) - var(--at)) / 0.12), 1);
   opacity: var(--d);
   transform: translateX(calc(var(--dx) * (var(--p) - 0.5) * 18px));
+  will-change: transform, opacity;
 }
 .ab-signal-dot {
   position: relative; flex: none; width: 9px; height: 9px; margin-top: 3px; border-radius: 50%;
@@ -183,6 +255,7 @@
   position: absolute; left: 6cqw; top: 8cqh; z-index: 2; font-size: clamp(40px, min(7.4cqw, 11cqh), 128px);
   opacity: calc(var(--in) * (1 - var(--out)));
   transform: translateY(calc((1 - var(--in)) * 5cqh));
+  will-change: transform, opacity;
 }
 .ab-orbit, .ab-senses-core { position: absolute; left: 50%; top: 60%; translate: -50% -50%; }
 .ab-orbit { width: 1px; height: 1px; opacity: calc(var(--in) * (1 - var(--out))); }
@@ -198,7 +271,10 @@
   z-index: 2; --gather: clamp(0, calc((var(--p) - 0.55) / 0.3), 1);
   opacity: calc(var(--in) * (1 - var(--out)));
   transform: scale(calc(1 + 0.4 * var(--gather)));
-  filter: drop-shadow(0 0 calc(10px + 34px * var(--gather)) rgba(var(--ab-glow), calc(0.25 + 0.45 * var(--gather))));
+  /* A smaller, capped blur radius — a drop-shadow this element repaints every
+     scroll frame, so a large animated radius is the expensive part, not the glow. */
+  filter: drop-shadow(0 0 calc(8px + 14px * var(--gather)) rgba(var(--ab-glow), calc(0.25 + 0.45 * var(--gather))));
+  will-change: transform, filter;
 }
 .ab-senses-list { list-style: none; margin: 0; padding: 0; }
 .ab-sense {
@@ -211,6 +287,7 @@
     translate(calc(var(--ox) * (1 - var(--t)) * 1cqw), calc(var(--oy) * (1 - var(--t)) * 1cqh))
     scale(calc(var(--z) * (1 - 0.7 * var(--t))));
   animation: ab-drift-a 12s ease-in-out infinite; animation-delay: calc(var(--i) * -2.3s);
+  will-change: transform, opacity;
 }
 .ab-sense:nth-child(2n) { animation-name: ab-drift-b; animation-duration: 15s; }
 .ab-sense-icon {
@@ -233,6 +310,7 @@
   display: inline-flex; align-items: baseline; white-space: nowrap; padding: 0 6cqw;
   font-size: clamp(56px, min(10cqw, 17cqh), 168px);
   transform: translateX(calc(clamp(0, calc((var(--q) - 0.12) / 0.8), 1) * (100cqw - 100%)));
+  will-change: transform;
 }
 .ab-pipe-word {
   display: inline-flex; align-items: baseline;
@@ -252,9 +330,20 @@
   opacity: calc(var(--in) * (1 - var(--out)));
 }
 .ab-flow-rail { position: absolute; left: calc(100% / 12); right: calc(100% / 12); top: 22px; height: 1px; background: rgba(242, 243, 244, 0.14); }
-.ab-flow-fill { position: absolute; left: 0; top: 0; height: 1px; width: calc(var(--q) * 100%); background: linear-gradient(90deg, rgba(242,243,244,0.2), rgba(var(--ab-glow), 0.9)); }
+/* Fill and dot move with transforms, not width/left — those re-ran layout on
+   every scroll frame. The track spans the rail, so translating it by its own
+   width × q puts the dot exactly where left: q×100% used to. */
+.ab-flow-fill {
+  position: absolute; left: 0; top: 0; height: 1px; width: 100%;
+  background: linear-gradient(90deg, rgba(242,243,244,0.2), rgba(var(--ab-glow), 0.9));
+  transform-origin: 0 50%; transform: scaleX(var(--q)); will-change: transform;
+}
+.ab-flow-track {
+  position: absolute; left: 0; top: 0; width: 100%; height: 0;
+  transform: translateX(calc(var(--q) * 100%)); will-change: transform;
+}
 .ab-flow-dot {
-  position: absolute; top: -5px; left: calc(var(--q) * 100%); width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%;
+  position: absolute; top: -5px; left: 0; width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%;
   background: #fff; box-shadow: 0 0 0 5px rgba(var(--ab-glow), 0.18), 0 0 24px rgba(var(--ab-glow), 0.9);
 }
 .ab-flow-node {
@@ -272,16 +361,189 @@
 .ab-flow-node b { font-family: var(--vf-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; }
 .ab-flow-node span:last-child { font-size: 12.5px; line-height: 1.5; color: rgba(242, 243, 244, 0.58); }
 
+/* ------------------------------------------------ 4b. BUILT FOR SNAPDRAGON
+   The edge architecture. The stack builds layer by layer with scroll
+   (Snapdragon → QAIRT → GenieX → Qwen3-VL-4B-Instruct → Orion → output),
+   the active layer glows, and a generic chip package turns beneath it. */
+.ab-edge .ab-stage { --q: clamp(0, calc((var(--p) - 0.08) / 0.74), 1); }
+
+.ab-chip {
+  position: absolute; right: 0; top: 50%; width: min(86cqh, 54cqw); aspect-ratio: 1; translate: 0 -50%;
+  perspective: 1400px; opacity: calc(var(--in) * 0.95); pointer-events: none;
+}
+.ab-chip-tilt {
+  width: 100%; height: 100%;
+  transform: rotateX(calc(54deg - var(--p) * 16deg)) rotateZ(calc(-34deg + var(--p) * 26deg)) scale(calc(0.9 + var(--q) * 0.1));
+  will-change: transform;
+}
+.ab-chip svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.ab-chip-grid path { fill: none; stroke: rgba(242, 243, 244, 0.045); stroke-width: 0.6; }
+.ab-chip-traces path {
+  fill: none; stroke: rgba(var(--ab-glow), 0.4); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round;
+  --tr: clamp(0, calc((var(--q) - var(--t) * 0.3) / 0.35), 1);
+  stroke-dasharray: 1 1; stroke-dashoffset: calc(1 - var(--tr));
+}
+.ab-chip-pins rect { fill: rgba(242, 243, 244, 0.22); }
+.ab-chip-pkg { fill: #08090b; stroke: rgba(242, 243, 244, 0.32); stroke-width: 1; }
+.ab-chip-die-glow { fill: rgba(var(--ab-glow), 0.16); opacity: var(--q); }
+.ab-chip-die { fill: #0c0d11; stroke: rgba(var(--ab-glow), 0.55); stroke-width: 1; }
+.ab-chip-cells rect {
+  fill: rgba(var(--ab-glow), 0.5); stroke: none;
+  opacity: calc(0.12 + 0.88 * clamp(0, calc((var(--q) - var(--t) * 0.8) / 0.12), 1));
+}
+.ab-chip-dot { fill: rgba(242, 243, 244, 0.5); }
+
+.ab-edge-copy {
+  position: absolute; left: 6cqw; top: 8cqh; z-index: 2; width: min(40cqw, 560px);
+  display: flex; flex-direction: column; gap: clamp(12px, 2.2cqh, 22px);
+  opacity: calc(var(--in) * (1 - var(--out))); transform: translateY(calc((1 - var(--in)) * 5cqh));
+  will-change: transform, opacity;
+}
+.ab-edge-kicker { display: flex; align-items: center; gap: 14px; color: rgba(242, 243, 244, 0.7); }
+.ab-edge-logo { display: block; height: 22px; width: auto; }
+.ab-edge-title { font-size: clamp(40px, min(7.4cqw, 11cqh), 128px); }
+.ab-edge-lead { max-width: 42ch; color: rgba(242, 243, 244, 0.66); }
+.ab-specs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 6px 0 0; }
+.ab-spec {
+  margin: 0; padding: 10px 12px; border: 1px solid rgba(242, 243, 244, 0.14); border-radius: 10px;
+  background: rgba(10, 11, 13, 0.78);
+  --vis: clamp(0, calc((var(--e) - 0.55 - var(--i) * 0.07) / 0.3), 1);
+  opacity: var(--vis);
+  transform: translateY(calc((1 - var(--vis)) * 14px + (0.5 - var(--p)) * (1 + var(--i) * 0.35) * 2cqh));
+  animation: ab-spec-float 11s ease-in-out infinite; animation-delay: calc(var(--i) * -2.7s);
+  will-change: transform, opacity;
+}
+.ab-spec:nth-child(2n) { animation-duration: 13s; }
+@keyframes ab-spec-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+.ab-spec dt { font-family: var(--vf-mono); font-size: 9.5px; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(242, 243, 244, 0.42); }
+.ab-spec dd { margin: 4px 0 0; font-size: 12.5px; color: var(--vf-text); }
+
+.ab-stack-wrap {
+  position: absolute; right: 6cqw; top: 50%; z-index: 2; width: min(46cqw, 620px); translate: 0 -50%;
+  opacity: calc(var(--in) * (1 - var(--out)));
+}
+.ab-stack { list-style: none; margin: 0; padding: 0; position: relative; display: flex; flex-direction: column; gap: clamp(6px, 1.3cqh, 14px); }
+.ab-stack-rail { position: absolute; left: 17px; top: 18px; bottom: 18px; width: 1px; background: rgba(242, 243, 244, 0.14); }
+.ab-stack-fill {
+  position: absolute; left: 0; top: 0; width: 1px; height: 100%;
+  background: linear-gradient(rgba(var(--ab-glow), 0.9), rgba(242, 243, 244, 0.25));
+  transform-origin: 50% 0; transform: scaleY(var(--q)); will-change: transform;
+}
+.ab-stack-track { position: absolute; left: 0; top: 0; width: 0; height: 100%; transform: translateY(calc(var(--q) * 100%)); will-change: transform; }
+.ab-stack-dot {
+  position: absolute; left: -5px; top: -5.5px; width: 11px; height: 11px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 5px rgba(var(--ab-glow), 0.18), 0 0 24px rgba(var(--ab-glow), 0.9);
+}
+.ab-layer {
+  position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; column-gap: 14px;
+  padding: clamp(8px, 1.5cqh, 14px) 14px clamp(8px, 1.5cqh, 14px) 0;
+  --on: clamp(0, calc((var(--q) - var(--at)) * 30 + 1), 1);
+  --on2: clamp(0, calc((var(--q) - var(--next)) * 30 + 1), 1);
+  --cur: calc(var(--on) - var(--on2));
+  --lit: calc(0.3 + 0.42 * var(--on) + 0.28 * var(--cur));
+  transform: translateX(calc((1 - var(--on)) * 22px));
+  will-change: transform;
+}
+/* The box stays solid so the chip never shows through; only the contents
+   dim until their layer is reached. */
+.ab-layer > .ab-layer-pin, .ab-layer > .ab-layer-body, .ab-layer > .ab-layer-tag { opacity: var(--lit); }
+/* The layer's box, and a glow that only the active layer shows. */
+.ab-layer::before, .ab-layer::after {
+  content: ''; position: absolute; left: 50px; right: 0; top: 0; bottom: 0; border-radius: 12px; pointer-events: none;
+}
+.ab-layer::before { border: 1px solid rgba(242, 243, 244, calc(0.08 + 0.1 * var(--on))); background: rgba(8, 9, 11, 0.94); }
+.ab-layer::after {
+  border: 1px solid rgba(var(--ab-glow), 0.7);
+  box-shadow: 0 0 36px -4px rgba(var(--ab-glow), 0.55), inset 0 0 24px rgba(var(--ab-glow), 0.1);
+  opacity: var(--cur); will-change: opacity;
+}
+.ab-layer > * { position: relative; z-index: 1; }
+.ab-layer-pin {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--vf-black);
+  border: 1px solid rgba(242, 243, 244, calc(0.2 + 0.6 * var(--on)));
+  display: grid; place-items: center;
+}
+.ab-layer-pin::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: var(--on); box-shadow: 0 0 12px rgba(var(--ab-glow), 0.9); }
+.ab-layer-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-left: 16px; }
+.ab-layer-name {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  font-family: 'Roboto Flex Variable', 'Roboto Flex', var(--vf-display); font-weight: 640; font-stretch: 72%;
+  text-transform: uppercase; line-height: 1; letter-spacing: -0.005em;
+  font-size: clamp(17px, min(2.1cqw, 3.4cqh), 30px); color: var(--vf-text);
+}
+.ab-layer-logo { height: 0.95em; width: auto; flex: none; }
+.ab-layer-sub { font-size: 12px; line-height: 1.4; color: rgba(242, 243, 244, 0.55); }
+.ab-layer-tag {
+  font-family: var(--vf-mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; white-space: nowrap;
+  padding: 5px 9px; border-radius: 999px; border: 1px dashed rgba(242, 243, 244, 0.3); color: rgba(242, 243, 244, 0.6);
+}
+.ab-layer.is-implemented .ab-layer-tag { border-style: solid; border-color: rgba(242, 243, 244, 0.42); color: var(--vf-text); }
+.ab-layer.is-validated .ab-layer-tag { border-style: solid; border-color: rgba(var(--ab-glow), 0.85); color: #fff; box-shadow: 0 0 16px rgba(var(--ab-glow), 0.45); }
+.ab-layer-out::before { background: rgba(var(--ab-glow), 0.06); border-color: rgba(var(--ab-glow), 0.3); }
+.ab-out-words { flex-wrap: wrap; gap: 0; }
+.ab-out-words > span {
+  --w: clamp(0, calc((var(--q) - var(--at) - var(--j) * 0.022) * 30 + 1), 1);
+  opacity: calc(0.25 + 0.75 * var(--w));
+}
+.ab-out-words em { font-style: normal; font-weight: 300; color: rgba(var(--ab-glow), 0.9); margin: 0 0.35em; }
+.ab-edge-status {
+  display: flex; align-items: flex-start; gap: 10px; margin: 16px 0 0 50px; max-width: 58ch;
+  font-size: 11.5px; line-height: 1.55; color: rgba(242, 243, 244, 0.5);
+  opacity: clamp(0, calc((var(--q) - 0.8) / 0.12), 1);
+}
+.ab-edge-status i { flex: none; width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; border: 1px dashed rgba(242, 243, 244, 0.6); }
+.ab-edge-status.is-validated { color: rgba(242, 243, 244, 0.8); }
+.ab-edge-status.is-validated i { border: none; background: #fff; box-shadow: 0 0 12px rgba(var(--ab-glow), 0.9); }
+
+/* Platforms, capabilities and notes — a flowing section after the pin. */
+.ab-edge-more { padding: 12cqh 6cqw 8cqh; display: flex; flex-direction: column; gap: clamp(28px, 6cqh, 64px); }
+.ab-plat-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.ab-plats, .ab-caps { list-style: none; margin: 0; padding: 0; }
+.ab-plats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(14px, 2cqw, 28px); }
+.ab-plat-float {
+  display: grid; gap: 10px; padding: clamp(18px, 2.4cqw, 28px); border-radius: 16px;
+  background: rgba(12, 13, 16, 0.82); border: 1px solid rgba(242, 243, 244, 0.14);
+  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8), 0 0 50px -30px rgba(var(--ab-glow), 0.5);
+  /* Cards float at different depths as the section scrolls past. */
+  transform: translateY(calc((0.5 - var(--p)) * var(--d) * 9cqh)) rotate(calc((0.5 - var(--p)) * (var(--d) - 1.1) * 5deg));
+  will-change: transform;
+}
+.ab-plat-chip {
+  width: 38px; height: 38px; margin: 6px 0 10px 6px; border-radius: 7px; display: grid; place-items: center;
+  border: 1px solid rgba(242, 243, 244, 0.4); outline: 1px dashed rgba(242, 243, 244, 0.28); outline-offset: 5px;
+}
+.ab-plat-chip i { width: 16px; height: 16px; border-radius: 3px; background: rgba(var(--ab-glow), 0.55); box-shadow: 0 0 16px rgba(var(--ab-glow), 0.8); }
+.ab-plat b {
+  font-family: 'Roboto Flex Variable', 'Roboto Flex', var(--vf-display); font-weight: 640; font-stretch: 72%;
+  text-transform: uppercase; line-height: 1; font-size: clamp(20px, min(2.3cqw, 4cqh), 32px);
+}
+.ab-nobr { white-space: nowrap; }
+.ab-plat-sub { font-family: var(--vf-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(242, 243, 244, 0.5); }
+.ab-plat-tag {
+  justify-self: start; margin-top: 4px; font-family: var(--vf-mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase;
+  padding: 5px 9px; border-radius: 999px; border: 1px dashed rgba(242, 243, 244, 0.3); color: rgba(242, 243, 244, 0.6);
+}
+.ab-caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(22px, 4cqh, 40px) clamp(18px, 3cqw, 44px); }
+.ab-cap { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; column-gap: 14px; row-gap: 6px; align-items: start; padding-top: 18px; border-top: 1px solid rgba(242, 243, 244, 0.1); }
+.ab-cap-icon { grid-row: span 2; align-self: start; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(242, 243, 244, 0.24); }
+.ab-cap b { margin-top: 5px; font-family: var(--vf-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.24em; text-transform: uppercase; }
+.ab-cap > span:last-child { font-size: 13px; line-height: 1.55; color: rgba(242, 243, 244, 0.56); }
+.ab-edge-notes { display: flex; flex-direction: column; gap: 12px; padding-top: 22px; border-top: 1px solid rgba(242, 243, 244, 0.1); }
+.ab-edge-stackline { margin: 0; font-family: var(--vf-mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(242, 243, 244, 0.45); line-height: 1.8; }
+.ab-edge-stackline span { color: var(--vf-text); }
+
 /* ------------------------------------------------ 5. MEMORY */
 .ab-memory .ab-stage { --q: clamp(0, calc((var(--p) - 0.1) / 0.72), 1); }
 .ab-memory-title {
   position: absolute; left: 6cqw; top: 8cqh; font-size: clamp(40px, min(7.4cqw, 11cqh), 128px);
   opacity: calc(var(--in) * (1 - var(--out))); transform: translateY(calc((1 - var(--in)) * 5cqh));
+  will-change: transform, opacity;
 }
 .ab-timeline { position: absolute; left: 0; right: 0; top: 40cqh; height: 38cqh; opacity: calc(var(--in) * (1 - var(--out))); }
 .ab-tl-rail {
   position: absolute; left: 0; top: 0; bottom: 0; width: 132cqw;
   transform: translateX(calc(8cqw + var(--q) * (84cqw - 100%)));
+  will-change: transform;
 }
 .ab-tl-line { position: absolute; left: 0; right: 0; top: 62%; height: 1px; background: linear-gradient(90deg, rgba(242,243,244,0), rgba(242,243,244,0.3) 8%, rgba(242,243,244,0.3) 92%, rgba(242,243,244,0)); }
 .ab-tl-year { position: absolute; left: 0; top: calc(62% - 30px); font-family: var(--vf-mono); font-size: 12px; letter-spacing: 0.3em; color: rgba(242, 243, 244, 0.5); }
@@ -302,13 +564,17 @@
 .ab-tl-label b { font-weight: 500; color: var(--vf-text); }
 .ab-tl-when { position: absolute; left: 0; top: calc(62% + 40px); translate: -50% 0; font-family: var(--vf-mono); font-size: 10px; letter-spacing: 0.2em; color: rgba(242, 243, 244, 0.35); }
 .ab-tl-card {
+  /* No backdrop-filter here: four of these animate transform + opacity every
+     scroll frame at once, and a live backdrop blur recomposites everything
+     behind each one on every frame — the single biggest cost on this page.
+     A slightly more opaque flat background reads the same at rest. */
   position: absolute; left: 0; bottom: calc(38% + 22px); width: clamp(190px, 19cqw, 250px); margin: 0; translate: -50% 0;
   display: flex; flex-direction: column; gap: 8px; padding: 12px;
-  background: rgba(14, 15, 18, 0.72); border: 1px solid rgba(242, 243, 244, 0.16); border-radius: 12px;
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  background: rgba(14, 15, 18, 0.86); border: 1px solid rgba(242, 243, 244, 0.16); border-radius: 12px;
   opacity: calc(var(--on) * (1 - 0.66 * var(--on2)));
   transform: translateY(calc((1 - var(--on)) * 16px)) scale(calc(1 - 0.08 * var(--on2)));
   transform-origin: 50% 100%;
+  will-change: transform, opacity;
 }
 .ab-tl-node.is-now .ab-tl-card { border-color: rgba(var(--ab-glow), 0.55); box-shadow: 0 0 40px -8px rgba(var(--ab-glow), 0.45); }
 .ab-tl-thumb { display: block; color: rgba(242, 243, 244, 0.8); height: 54px; border-radius: 8px; background: rgba(242, 243, 244, 0.04); }
@@ -320,30 +586,93 @@
 .ab-field-title {
   position: absolute; left: 6cqw; top: 8cqh; z-index: 2; font-size: clamp(40px, min(7.4cqw, 11cqh), 128px);
   opacity: calc(var(--in) * (1 - var(--out))); transform: translateY(calc((1 - var(--in)) * 5cqh));
+  will-change: transform, opacity;
 }
 .ab-field-stage { position: absolute; inset: 0; }
+/* Each object, in beats (q = 0 → 1 over its fifth of the scene):
+     0.00–0.30  slides in, straightens, grows — and its lines draw themselves
+     0.30–0.70  held: an inspection line sweeps down it, tags pop in one by one
+     0.70–1.00  tags leave, it shrinks and slides out as the next arrives */
 .ab-obj {
   position: absolute; left: 50%; top: 60%; width: min(520px, 44cqw); margin: 0; translate: -50% -50%;
   --q: clamp(0, calc(var(--p) * 5 - var(--i)), 1);
+  --in1: clamp(0, calc(var(--q) / 0.3), 1);
+  --out1: clamp(0, calc((var(--q) - 0.7) / 0.3), 1);
+  --draw: clamp(0, calc((var(--q) - 0.02) / 0.3), 1);
+  --scan: clamp(0, calc((var(--q) - 0.3) / 0.4), 1);
   --hold: calc(clamp(0, calc((var(--q) - 0.3) / 0.08), 1) * clamp(0, calc((0.7 - var(--q)) / 0.08), 1));
   opacity: min(clamp(0, calc(var(--q) / 0.16), 1), clamp(0, calc((1 - var(--q)) / 0.16), 1));
   transform:
-    translateX(calc((1 - clamp(0, calc(var(--q) / 0.3), 1)) * 64cqw - clamp(0, calc((var(--q) - 0.7) / 0.3), 1) * 64cqw))
-    rotate(calc((0.5 - var(--q)) * 8deg));
+    translateX(calc((1 - var(--in1)) * 64cqw - var(--out1) * 64cqw))
+    rotate(calc((0.5 - var(--q)) * 8deg))
+    scale(calc(0.82 + 0.18 * var(--in1) - 0.1 * var(--out1)));
+  /* Own layer: the art's drop-shadow is rasterised once, not per frame. */
+  will-change: transform, opacity;
 }
-.ab-obj-art { color: rgba(242, 243, 244, 0.88); filter: drop-shadow(0 0 26px rgba(var(--ab-glow), 0.18)); }
+/* The last object does not exit. Every other object hands over to the next
+   one, but after the fifth there is no next one: it used to slide out at the
+   very end of the pin, so the stage scrolled away as an empty black screen
+   right before "Built for Snapdragon". It now stops in its held state (art
+   drawn, name and tags showing, scan finished) and leaves by scrolling up
+   with the stage while the Snapdragon scene slides in beneath it. */
+.ab-obj:last-child {
+  --q: min(clamp(0, calc(var(--p) * 5 - var(--i)), 1), 0.62);
+  --scan: clamp(0, calc((var(--q) - 0.3) / 0.32), 1);
+}
+.ab-obj-art { position: relative; color: rgba(242, 243, 244, 0.88); filter: drop-shadow(0 0 26px rgba(var(--ab-glow), 0.18)); will-change: transform; }
+/* Line drawing: every stroke has pathLength="1" and a --sw stroke width
+   (both set in About.tsx). */
+.ab-obj-art svg :is(path, rect, circle, ellipse, line, polyline, polygon) {
+  vector-effect: none; stroke-width: var(--sw, 1.4);
+  stroke-dasharray: 1 1; stroke-dashoffset: calc(1 - var(--draw));
+}
+.ab-obj-scan {
+  position: absolute; left: -8%; right: -8%; top: 0; bottom: 0; pointer-events: none;
+  transform: translateY(calc(var(--scan) * 100%));
+  opacity: min(calc(var(--scan) * 8), calc((1 - var(--scan)) * 8), 1);
+  will-change: transform, opacity;
+}
+.ab-obj-scan::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(var(--ab-glow), 0), rgba(var(--ab-glow), 0.95) 30%, rgba(var(--ab-glow), 0.95) 70%, rgba(var(--ab-glow), 0));
+  box-shadow: 0 0 14px rgba(var(--ab-glow), 0.8);
+}
+.ab-obj-scan::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 48px;
+  background: linear-gradient(rgba(var(--ab-glow), 0), rgba(var(--ab-glow), 0.12));
+}
+.ab-obj .ab-obj-num {
+  position: absolute; left: 50%; top: 44%; z-index: -1; pointer-events: none;
+  font-size: clamp(150px, 36cqh, 400px); font-weight: 760; line-height: 1;
+  color: rgba(242, 243, 244, 0.045);
+  translate: -50% -50%;
+  transform: translateX(calc((0.5 - var(--q)) * 34cqw));
+  will-change: transform;
+}
+.ab-field-progress {
+  position: absolute; left: 6cqw; bottom: clamp(24px, 6cqh, 64px); display: flex; gap: 6px;
+  opacity: calc(var(--in) * (1 - var(--out)));
+}
+.ab-field-progress i { position: relative; width: clamp(28px, 4cqw, 56px); height: 2px; border-radius: 2px; overflow: hidden; background: rgba(242, 243, 244, 0.14); }
+.ab-field-progress i::after {
+  content: ''; position: absolute; inset: 0; background: rgba(242, 243, 244, 0.9);
+  transform-origin: 0 50%; transform: scaleX(clamp(0, calc(var(--p) * 5 - var(--i)), 1)); will-change: transform;
+}
 .ab-obj-art svg { display: block; width: 100%; height: auto; overflow: visible; }
 .ab-obj-name {
   margin-top: 14px; text-align: center; font-family: var(--vf-mono); font-size: 13px; letter-spacing: 0.3em; text-transform: uppercase;
-  opacity: var(--hold);
+  opacity: var(--hold); translate: 0 calc((1 - var(--hold)) * 14px);
 }
 .ab-obj-name span { display: block; margin-bottom: 6px; font-size: 10px; letter-spacing: 0.24em; color: rgba(242, 243, 244, 0.4); }
 .ab-obj-words { list-style: none; margin: 0; padding: 0; }
 .ab-obj-words li {
   position: absolute; font-family: var(--vf-mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; white-space: nowrap;
   color: var(--vf-text); padding: 6px 10px; border: 1px solid rgba(242, 243, 244, 0.18); border-radius: 999px; background: rgba(0, 0, 0, 0.55);
-  opacity: var(--hold);
-  translate: 0 calc((1 - var(--hold)) * 8px);
+  /* Tags pop in one after another, and leave in the same order. */
+  --w: calc(clamp(0, calc((var(--q) - 0.3 - var(--j) * 0.05) / 0.05), 1) * clamp(0, calc((0.76 - var(--j) * 0.02 - var(--q)) / 0.05), 1));
+  opacity: var(--w);
+  translate: 0 calc((1 - var(--w)) * 12px);
+  scale: calc(0.8 + 0.2 * var(--w));
 }
 .ab-obj-words li:nth-child(1) { left: -6%; top: 2%; }
 .ab-obj-words li:nth-child(2) { right: -6%; top: 10%; }
@@ -414,42 +743,91 @@
   position: absolute; inset: 0;
   background: radial-gradient(60% 55% at 50% 50%, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.92));
   opacity: clamp(0, calc(var(--p) * 1.6), 1);
+  will-change: opacity;
 }
 .ab-end-copy {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: clamp(14px, 3cqh, 28px); text-align: center;
   padding: 0 20px calc(var(--vf-safe-bottom) + 12px);
 }
+/* Ending, in beats:
+     0.00–0.30  the moon spins in; three light rings pulse out from it
+     0.13–0.33  SEE CLEARER. rises letter by letter
+     0.25–0.45  WORK SMARTER. gathers in from wide spacing
+     0.38–0.50  ORION's letters close up from the edges toward the centre
+     0.48–0.65  the button draws its frame, brackets slide in, label lifts
+     0.74–1.00  everything settles as the stars rush in and go still */
+.ab-end-copy { --z: clamp(0, calc((var(--p) - 0.74) / 0.26), 1); transform: scale(calc(1 - 0.03 * var(--z))); will-change: transform; }
+.ab-end-markwrap { position: relative; display: grid; place-items: center; }
+.ab-end-ring {
+  position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%;
+  border: 1px solid rgba(var(--ab-glow), 0.6); pointer-events: none;
+  --w: clamp(0, calc((var(--p) - 0.01 - var(--k) * 0.08) / 0.28), 1);
+  transform: scale(calc(0.6 + var(--w) * 5.5));
+  opacity: calc(min(var(--w) * 5, 1 - var(--w)) * 0.7);
+  will-change: transform, opacity;
+}
 .ab-end-mark {
   display: block;
-  --a: clamp(0, calc((var(--p) - 0.08) / 0.14), 1);
+  --a: clamp(0, calc(var(--p) / 0.14), 1);
   opacity: var(--a);
-  transform: scale(calc(0.8 + 0.2 * var(--a) + 0.16 * clamp(0, calc((var(--p) - 0.7) / 0.3), 1)));
-  filter: drop-shadow(0 0 calc(12px + 30px * clamp(0, calc((var(--p) - 0.6) / 0.4), 1)) rgba(var(--ab-glow), 0.5));
+  transform:
+    rotate(calc((1 - var(--a)) * -140deg + var(--p) * 30deg))
+    scale(calc(0.55 + 0.45 * var(--a) + 0.16 * clamp(0, calc((var(--p) - 0.7) / 0.3), 1)));
+  filter: drop-shadow(0 0 16px rgba(var(--ab-glow), 0.5));
+  will-change: transform, opacity;
 }
 .ab-end-title { font-size: clamp(38px, min(8.6cqw, 13cqh), 140px); }
-.ab-end-title > span:nth-child(1) { --a: clamp(0, calc((var(--p) - 0.22) / 0.12), 1); }
-.ab-end-title > span:nth-child(2) { --a: clamp(0, calc((var(--p) - 0.32) / 0.12), 1); }
-.ab-end-title > span { opacity: var(--a); transform: translateY(calc((1 - var(--a)) * 20px)); }
+.ab-end-title > span:nth-child(1) .ab-ch {
+  --a: clamp(0, calc((var(--p) - 0.13 - var(--k) * 0.012) / 0.07), 1);
+  opacity: var(--a);
+  transform: translateY(calc((1 - var(--a)) * 0.6em)) rotate(calc((1 - var(--a)) * 10deg)) scale(calc(0.7 + 0.3 * var(--a)));
+}
+.ab-end-title > span:nth-child(2) .ab-ch {
+  --a: clamp(0, calc((var(--p) - 0.25 - var(--k) * 0.007) / 0.12), 1);
+  opacity: var(--a);
+  transform: translateX(calc((var(--k) - var(--n) / 2) * (1 - var(--a)) * 0.34em));
+}
 .ab-end-name {
   margin: 0; font-family: var(--vf-mono); font-size: 13px; letter-spacing: 0.9em; margin-right: -0.9em; text-transform: uppercase;
-  opacity: clamp(0, calc((var(--p) - 0.44) / 0.1), 1);
+}
+.ab-end-name .ab-ch {
+  --a: clamp(0, calc((var(--p) - 0.38) / 0.12), 1);
+  opacity: var(--a);
+  transform: translateX(calc((var(--k) - 2) * (1 - var(--a)) * 2.4em));
 }
 .ab-cta {
-  --a: clamp(0, calc((var(--p) - 0.54) / 0.1), 1);
-  opacity: var(--a); transform: translateY(calc((1 - var(--a)) * 14px));
+  --d: clamp(0, calc((var(--p) - 0.48) / 0.1), 1);   /* frame draws */
+  --b: clamp(0, calc((var(--p) - 0.54) / 0.08), 1);  /* brackets slide in */
+  --l: clamp(0, calc((var(--p) - 0.57) / 0.08), 1);  /* label lifts */
   pointer-events: auto; visibility: visible;
   position: relative; margin-top: 8px; display: inline-flex; align-items: center; gap: 14px;
   min-height: 52px; padding: 0 26px; cursor: pointer;
   font-family: var(--vf-mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.26em; text-transform: uppercase; color: var(--vf-text);
-  background: rgba(242, 243, 244, 0.03); border: 1px solid rgba(242, 243, 244, 0.42); border-radius: 4px;
-  transition: background 400ms var(--ab-ease), box-shadow 500ms var(--ab-ease), border-color 400ms var(--ab-ease);
+  background: rgba(242, 243, 244, calc(0.03 * var(--d))); border: 1px solid transparent; border-radius: 4px;
+  transition: box-shadow 500ms var(--ab-ease);
 }
-.ab-cta::before { content: '['; opacity: 0.6; }
-.ab-cta::after { content: ']'; opacity: 0.6; }
+.ab-cta-edge { position: absolute; background: rgba(242, 243, 244, 0.42); transition: background 400ms var(--ab-ease); will-change: transform; }
+.ab-cta-edge.t, .ab-cta-edge.b { left: -1px; right: -1px; height: 1px; transform: scaleX(var(--d)); }
+.ab-cta-edge.t { top: -1px; }
+.ab-cta-edge.b { bottom: -1px; }
+.ab-cta-edge.l, .ab-cta-edge.r { top: -1px; bottom: -1px; width: 1px; transform: scaleY(var(--b)); }
+.ab-cta-edge.l { left: -1px; }
+.ab-cta-edge.r { right: -1px; }
+.ab-cta::before, .ab-cta::after { display: inline-block; opacity: calc(0.6 * var(--b)); }
+.ab-cta::before { content: '['; transform: translateX(calc((1 - var(--b)) * -22px)); }
+.ab-cta::after { content: ']'; transform: translateX(calc((1 - var(--b)) * 22px)); }
+.ab-cta-label { display: inline-block; opacity: var(--l); transform: translateY(calc((1 - var(--l)) * 10px)); }
 .ab-cta:hover, .ab-cta:focus-visible, .ab-cta:active {
-  background: rgba(242, 243, 244, 0.08); border-color: rgba(242, 243, 244, 0.85);
+  background: rgba(242, 243, 244, 0.08);
   box-shadow: 0 0 0 6px rgba(var(--ab-glow), 0.08), 0 0 44px rgba(var(--ab-glow), 0.42);
 }
+.ab-cta:hover .ab-cta-edge, .ab-cta:focus-visible .ab-cta-edge, .ab-cta:active .ab-cta-edge { background: rgba(242, 243, 244, 0.85); }
+.ab-end-credit {
+  display: flex; align-items: center; gap: 10px; margin: 6px 0 0;
+  font-family: var(--vf-mono); font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: rgba(242, 243, 244, 0.45);
+  opacity: clamp(0, calc((var(--p) - 0.6) / 0.1), 1);
+}
+.ab-end-credit img { height: 14px; width: auto; opacity: 0.85; }
 
 /* ==========================================================================
    Phones — composed for a tall narrow screen, not scaled down.
@@ -496,8 +874,12 @@
     top: auto; bottom: 3cqh; left: 6cqw; right: 6cqw; grid-template-columns: 1fr; row-gap: 10px; column-gap: 0;
   }
   .ab-flow-rail { left: 17px; right: auto; top: 18px; bottom: 18px; width: 1px; height: auto; }
-  .ab-flow-fill { width: 1px; height: calc(var(--q) * 100%); background: linear-gradient(rgba(242,243,244,0.2), rgba(var(--ab-glow), 0.9)); }
-  .ab-flow-dot { left: -5px; top: calc(var(--q) * 100%); margin-left: 0; margin-top: -5.5px; }
+  .ab-flow-fill {
+    width: 1px; height: 100%; background: linear-gradient(rgba(242,243,244,0.2), rgba(var(--ab-glow), 0.9));
+    transform-origin: 50% 0; transform: scaleY(var(--q));
+  }
+  .ab-flow-track { width: 0; height: 100%; transform: translateY(calc(var(--q) * 100%)); }
+  .ab-flow-dot { left: -5px; top: 0; margin-left: 0; margin-top: -5.5px; }
   .ab-flow-node { display: grid; grid-template-columns: 36px 1fr; column-gap: 14px; row-gap: 2px; align-items: center; text-align: left; }
   .ab-flow-icon { grid-row: span 2; width: 36px; height: 36px; margin: 0; }
   .ab-flow-icon .ab-cue { width: 17px; height: 17px; }
@@ -525,6 +907,42 @@
   .ab-obj-words li:nth-child(4) { right: 0; bottom: auto; top: 108%; }
   .ab-obj-name { margin-top: 56px; }
   .ab-field-note { left: 6cqw; right: 6cqw; bottom: 3cqh; text-align: left; font-size: 12px; }
+  .ab-field-progress { bottom: auto; top: calc(5cqh + 2 * 0.9 * clamp(30px, 9.6cqw, 56px) + 14px); }
+  .ab-field-progress i { width: 22px; }
+  .ab-obj .ab-obj-num { font-size: clamp(120px, 44cqw, 220px); top: 40%; }
+
+  /* Built for Snapdragon: copy on top, the stack below, cards stacked. */
+  .ab-edge-copy { left: 6cqw; right: 6cqw; top: 5cqh; width: auto; gap: 10px; }
+  .ab-edge-title { font-size: clamp(30px, 9.6cqw, 56px); }
+  .ab-edge-lead { font-size: 12px; line-height: 1.55; }
+  .ab-edge-kicker { font-size: 10px; }
+  .ab-edge-logo { height: 18px; }
+  .ab-specs { display: none; }
+  .ab-chip { right: auto; left: 50%; top: 64%; width: 96cqw; translate: -50% -50%; opacity: calc(var(--in) * 0.6); }
+  .ab-stack-wrap { left: 6cqw; right: 6cqw; width: auto; top: auto; bottom: 3cqh; translate: none; }
+  .ab-stack { gap: 6px; }
+  .ab-stack-rail { left: 13px; top: 14px; bottom: 14px; }
+  .ab-layer { grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 10px 9px 0; }
+  .ab-layer::before, .ab-layer::after { left: 38px; border-radius: 10px; }
+  .ab-layer-pin { width: 28px; height: 28px; }
+  .ab-layer-pin::after { width: 6px; height: 6px; }
+  .ab-layer-body { padding-left: 12px; }
+  .ab-layer-name { display: block; font-size: clamp(13px, 3.7cqw, 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ab-layer-logo { display: none; } /* the kicker carries the logo on phones */
+  .ab-out-words { white-space: normal; font-size: clamp(12px, 3.4cqw, 15px); }
+  /* Only the active layer shows its detail line, so the stack stays short. */
+  .ab-layer-sub { font-size: 10.5px; overflow: hidden; max-height: calc(var(--cur) * 30px); opacity: var(--cur); }
+  .ab-layer-tag { font-size: 7.5px; letter-spacing: 0.12em; padding: 3px 6px; }
+  .ab-edge-status { margin: 10px 0 0 38px; font-size: 10.5px; }
+
+  .ab-edge-more { padding: 10cqh 6cqw 6cqh; }
+  .ab-plats { grid-template-columns: 1fr; gap: 12px; }
+  .ab-plat-float { grid-template-columns: auto 1fr; column-gap: 16px; row-gap: 6px; align-items: center; padding: 16px; transform: translateY(calc((0.5 - var(--p)) * var(--d) * 3cqh)); }
+  .ab-plat-chip { grid-row: span 3; margin: 0 6px; }
+  .ab-plat b { font-size: 19px; }
+  .ab-caps { grid-template-columns: 1fr; gap: 16px; }
+  .ab-cap { padding-top: 14px; }
+  .ab-cap > span:last-child { font-size: 12.5px; }
 
   .ab-local { padding: 10cqh 6cqw; }
   .ab-local-title { font-size: clamp(30px, 9.6cqw, 56px); }
@@ -579,11 +997,31 @@ html.reduce-motion .ab-sense {
   html.reduce-motion .ab-sense { transform: translate(-50%, -50%) translate(calc(var(--mox) * 1cqw), calc(var(--moy) * 1cqh)) !important; }
 }
 html.reduce-motion .ab-obj { transform: none !important; }
+html.reduce-motion .ab-ch,
+html.reduce-motion .ab-hero-mark,
+html.reduce-motion .ab-hero-name,
+html.reduce-motion .ab-hero-sub,
+html.reduce-motion .ab-end-copy,
+html.reduce-motion .ab-cta-edge,
+html.reduce-motion .ab-cta-label,
+html.reduce-motion .ab-cta::before,
+html.reduce-motion .ab-cta::after,
+html.reduce-motion .ab-obj .ab-obj-num { transform: none !important; }
+html.reduce-motion .ab-warp, html.reduce-motion .ab-end-ring, html.reduce-motion .ab-obj-scan { display: none; }
+html.reduce-motion .ab-edge-copy,
+html.reduce-motion .ab-layer,
+html.reduce-motion .ab-plat-float { transform: none !important; }
+html.reduce-motion .ab-spec { transform: none !important; animation: none !important; }
+html.reduce-motion .ab-chip-tilt { transform: rotateX(46deg) rotateZ(-22deg) !important; }
+html.reduce-motion .ab-chip-traces path { stroke-dashoffset: 0 !important; }
+html.reduce-motion .ab-stack-dot { display: none; }
+html.reduce-motion .ab-obj-art svg :is(path, rect, circle, ellipse, line, polyline, polygon) { stroke-dashoffset: 0 !important; }
+html.reduce-motion .ab-obj-words li, html.reduce-motion .ab-obj-name { translate: none !important; scale: none !important; }
 html.reduce-motion .ab-pipe-row { transform: none !important; flex-wrap: wrap; white-space: normal; justify-content: center; font-size: clamp(34px, 6cqw, 96px); }
 html.reduce-motion .ab-tl-rail { transform: none !important; width: 100%; left: 0; }
 html.reduce-motion .ab-flow-dot, html.reduce-motion .ab-wire-pulse, html.reduce-motion .ab-arch-signal, html.reduce-motion .ab-scroll-hint { display: none; }
 html.reduce-motion .ab-wire { stroke-dashoffset: 0; }
-html.reduce-motion .ab-seq { animation: ab-appear 700ms ease both !important; animation-delay: calc(var(--i) * 120ms) !important; }
+html.reduce-motion .ab-seq { animation: ab-appear 700ms ease backwards !important; animation-delay: calc(var(--i) * 120ms) !important; }
 html.reduce-motion .ab [data-reveal] { transition-property: opacity !important; transition-duration: 700ms !important; }
 @media (max-width: 767px) {
   html.reduce-motion .ab-timeline { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }

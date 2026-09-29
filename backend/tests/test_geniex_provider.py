@@ -11,12 +11,44 @@ import asyncio
 import json
 import sys
 
+import pytest
 from PIL import Image
 
 from app.config import settings
 from app.models.base import READY, UNAVAILABLE, ImageRef
+from app.models import geniex as geniex_mod
 from app.models.geniex import GenieXQwen3VLProvider, display_name, to_geniex_messages
 from tests import fake_geniex
+
+
+@pytest.fixture(autouse=True)
+def _snapdragon_host(monkeypatch):
+    """These tests exercise the adapter as it behaves on its target host
+    (Windows ARM64). The AMD64 gate has its own tests below."""
+    monkeypatch.setattr(geniex_mod, "_host",
+                        lambda: {"system": "Windows", "machine": "ARM64", "python": "3.12.10"})
+
+
+def _bundle(tmp_path, **over):
+    """A geniex_qairt bundle folder shaped like the real AI Hub Models export
+    (metadata.json keys and file list), with tiny placeholder files."""
+    d = tmp_path / "qwen3_vl_4b_instruct-geniex_qairt-w4a16-qualcomm_snapdragon_x_elite"
+    d.mkdir()
+    files = ["vision_encoder.bin", "part1_of_4.bin", "part2_of_4.bin", "part3_of_4.bin", "part4_of_4.bin"]
+    meta = {
+        "model_id": "qwen3_vl_4b_instruct", "model_name": "Qwen3-VL-4B-Instruct",
+        "runtime": "geniex_qairt", "precision": "w4a16",
+        "tool_versions": {"qairt": "2.45.0.260326154327"},
+        "model_files": {f: {"inputs": {}, "outputs": {}} for f in files},
+        "genie": {"supports_vision": True},
+        "chipset_attributes": {"name": "qualcomm-snapdragon-x-elite", "htp_version": 73,
+                               "soc_model": 60, "reference_device": "Snapdragon X Elite CRD"},
+    }
+    meta.update(over)
+    (d / "metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+    for f in files + ["tokenizer.json"]:
+        (d / f).write_bytes(b"x")
+    return d
 
 
 def _install(monkeypatch, **kw):
@@ -114,6 +146,67 @@ def test_probe_disabled_never_claims_npu(monkeypatch):
     h = GenieXQwen3VLProvider().health()
     assert h.status == READY and h.npu is False
     assert "probe_ran" in h.detail["npu_verdict"]
+
+
+# ------------------------------------------------- host gate and bundle
+
+def test_amd64_host_with_bundle_is_unavailable_and_says_why(monkeypatch, tmp_path):
+    state = _install(monkeypatch)                 # even an importable geniex is not used
+    monkeypatch.setattr(geniex_mod, "_host",
+                        lambda: {"system": "Windows", "machine": "AMD64", "python": "3.12.10"})
+    monkeypatch.setattr(settings, "geniex_model_path", str(_bundle(tmp_path)))
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == UNAVAILABLE and h.npu is False and h.accelerator == "none"
+    assert "Qwen3-VL-4B-Instruct asset installed" in h.reason
+    assert "requires a Windows ARM64 Snapdragon machine" in h.reason
+    assert "Windows AMD64" in h.reason and "Snapdragon X Elite CRD" in h.reason
+    assert state["loads"] == []
+
+
+def test_amd64_host_without_bundle_is_unavailable(monkeypatch):
+    monkeypatch.setattr(geniex_mod, "_host",
+                        lambda: {"system": "Linux", "machine": "x86_64", "python": "3.12.3"})
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == UNAVAILABLE and h.npu is False
+    assert "requires a Windows ARM64 Snapdragon machine" in h.reason
+
+
+def test_bundle_path_without_metadata_is_rejected(monkeypatch, tmp_path):
+    _install(monkeypatch)
+    monkeypatch.setattr(settings, "geniex_model_path", str(tmp_path))
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == UNAVAILABLE and "no metadata.json" in h.reason
+
+
+def test_bundle_for_a_different_model_is_rejected(monkeypatch, tmp_path):
+    _install(monkeypatch)
+    monkeypatch.setattr(settings, "geniex_model_path", str(_bundle(tmp_path, model_id="llama_v3_2_3b")))
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == UNAVAILABLE and "not qwen3_vl_4b_instruct" in h.reason
+
+
+def test_incomplete_bundle_is_rejected(monkeypatch, tmp_path):
+    state = _install(monkeypatch)
+    d = _bundle(tmp_path)
+    (d / "part3_of_4.bin").unlink()
+    monkeypatch.setattr(settings, "geniex_model_path", str(d))
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == UNAVAILABLE and "missing: part3_of_4.bin" in h.reason
+    assert state["loads"] == []
+
+
+def test_bundle_path_loads_that_folder_on_qairt(monkeypatch, tmp_path):
+    state = _install(monkeypatch)
+    d = _bundle(tmp_path)
+    monkeypatch.setattr(settings, "geniex_model_path", str(d))
+    h = GenieXQwen3VLProvider().health()
+    assert h.status == READY and h.npu is True
+    load = state["loads"][0]
+    assert load["source"] == str(d) and load["device_map"] == "qairt"
+    assert load["precision"] == "w4a16" and "n_ctx" not in load
+    b = h.detail["bundle"]
+    assert b["model_name"] == "Qwen3-VL-4B-Instruct" and b["qairt_version"].startswith("2.45")
+    assert h.detail["bundle_chipset_match"] is True
 
 
 # ------------------------------------------------------------- conversion

@@ -18,9 +18,16 @@ Over HTTP the server would be a black box and the honest NPU claim would be
 What READY means here — nothing is inferred from configuration or from the
 package being installed:
 
+0. This is an ARM64 Python on a Snapdragon-class host. GenieX ships native
+   runtimes only for Windows ARM64 and Linux aarch64 (its own install-time SDK
+   fetcher refuses anything else), so an AMD64/x86-64 host is reported as
+   unavailable with that reason — even when the model bundle is on disk.
 1. ``geniex`` imports and ``geniex.init()`` succeeds.
 2. The model bundle is present in the GenieX cache (``geniex pull ...``) or at
-   ``VF_GENIEX_MODEL_PATH``.
+   ``VF_GENIEX_MODEL_PATH`` — a Qualcomm AI Hub Models ``geniex_qairt`` export
+   folder (metadata.json, genie configs, the part*_of_N.bin context binaries,
+   vision_encoder.bin, tokenizer.json). The folder is checked file by file
+   before anything is loaded; GenieX reads metadata.json from it directly.
 3. ``from_pretrained`` actually creates the model handle.
 4. A short probe generation returns real tokens.
 
@@ -37,6 +44,7 @@ different model (app/models/registry.py).
 from __future__ import annotations
 
 import asyncio
+import json
 import platform
 import threading
 import time
@@ -57,6 +65,11 @@ QAIRT = "qairt"
 
 # A tiny, deterministic generation used to prove the model really runs before
 # the provider calls itself ready.
+# Where GenieX's native runtime exists (geniex 0.7.0 `_sdk_fetch._detect_platform`).
+GENIEX_HOSTS = {("Windows", "ARM64"), ("Linux", "AARCH64"), ("Linux", "ARM64")}
+BUNDLE_RUNTIME = "geniex_qairt"
+BUNDLE_MODEL_ID = "qwen3_vl_4b_instruct"
+
 PROBE_MESSAGES = [{"role": "user", "content": "Reply with the single word: ready"}]
 PROBE_TOKENS = 8
 
@@ -144,8 +157,26 @@ class GenieXQwen3VLProvider(ReasoningProvider):
         return ModelUnavailable(reason, model=self.model_id, fallback=FALLBACK)
 
     def _load(self) -> None:
-        host = {"system": platform.system(), "machine": platform.machine(),
-                "python": platform.python_version()}
+        host = _host()
+        # The bundle is inspected first, on any host, so the status can say
+        # truthfully whether the asset is installed even where it cannot run.
+        bundle: Optional[Dict[str, Any]] = None
+        if settings.geniex_model_path:
+            bundle = self._inspect_bundle(Path(settings.geniex_model_path))
+
+        if (host["system"], host["machine"].upper()) not in GENIEX_HOSTS:
+            where = f"{host['system']} {host['machine']}, Python {host['python']}"
+            if bundle:
+                raise self._unavailable(
+                    f"{bundle['model_name']} asset installed ({bundle['precision']}, QAIRT "
+                    f"{bundle['qairt_version']}, built for {bundle['chipset']}) at {bundle['path']}, "
+                    "but local GenieX/QAIRT NPU execution requires a Windows ARM64 Snapdragon "
+                    f"machine with ARM64 Python. This host is {where}. Remote validation on a "
+                    "hosted Snapdragon device: scripts/aihub_devicecloud_validate.py.")
+            raise self._unavailable(
+                "local GenieX/QAIRT NPU execution requires a Windows ARM64 Snapdragon machine "
+                f"with ARM64 Python; this host is {where}.")
+
         try:
             import geniex as gx  # type: ignore
         except Exception as exc:
@@ -164,6 +195,8 @@ class GenieXQwen3VLProvider(ReasoningProvider):
 
         evidence: Dict[str, Any] = {"host": host, "model_ref": self.model_ref,
                                     "device_map_requested": self.device_map}
+        if bundle:
+            evidence["bundle"] = bundle
         evidence["geniex_version"] = _safe(gx.version) or getattr(gx, "__version__", None)
         runtimes = _safe(gx.get_runtime_list) or []
         evidence["runtimes"] = runtimes
@@ -172,6 +205,9 @@ class GenieXQwen3VLProvider(ReasoningProvider):
             evidence["qairt_compute_units"] = [
                 list(cu) for cu in (_safe(lambda: gx.get_compute_unit_list(QAIRT)) or [])]
         evidence["chipset"] = _safe(lambda: gx.model_manager.detect_chipset(offline=True))
+        if bundle and evidence["chipset"]:
+            # Context binaries are compiled per SoC; record whether this one matches.
+            evidence["bundle_chipset_match"] = _same_chipset(evidence["chipset"], bundle)
 
         wants_npu = self.device_map in (QAIRT, "npu", "qairt:npu")
         if wants_npu and QAIRT not in runtimes:
@@ -187,7 +223,10 @@ class GenieXQwen3VLProvider(ReasoningProvider):
             kwargs: Dict[str, Any] = {"device_map": self.device_map}
             if settings.geniex_precision:
                 kwargs["precision"] = settings.geniex_precision
-            if settings.geniex_n_ctx:
+            elif bundle:
+                kwargs["precision"] = bundle["precision"]
+            # QAIRT takes the context length from the bundle and ignores n_ctx.
+            if settings.geniex_n_ctx and not self.device_map.startswith(QAIRT):
                 kwargs["n_ctx"] = settings.geniex_n_ctx
             self._model = gx.AutoModelForVision2Seq.from_pretrained(source, **kwargs)
         except Exception as exc:
@@ -232,15 +271,53 @@ class GenieXQwen3VLProvider(ReasoningProvider):
         log.info("GenieX %s ready: backend=%s device=%s npu=%s load_ms=%s",
                  self.model_id, meta.get("backend"), meta.get("device"), npu, load_ms)
 
+    def _inspect_bundle(self, p: Path) -> Dict[str, Any]:
+        """Check a Qualcomm AI Hub Models ``geniex_qairt`` export folder on disk:
+        it must be the Qwen3-VL-4B-Instruct VLM bundle and every file its own
+        metadata.json lists must be present. Reads only small JSON files."""
+        if not p.is_dir():
+            raise self._unavailable(f"VF_GENIEX_MODEL_PATH is not a folder: {p}")
+        meta_path = p / "metadata.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            raise self._unavailable(
+                f"{p} has no metadata.json — point VF_GENIEX_MODEL_PATH at the extracted "
+                "Qualcomm AI Hub Models geniex_qairt bundle folder itself")
+        except (OSError, ValueError) as exc:
+            raise self._unavailable(f"{meta_path} is unreadable: {type(exc).__name__}: {exc}")
+        if meta.get("runtime") != BUNDLE_RUNTIME:
+            raise self._unavailable(
+                f"{p} is a '{meta.get('runtime')}' export, not a {BUNDLE_RUNTIME} bundle")
+        if meta.get("model_id") != BUNDLE_MODEL_ID:
+            raise self._unavailable(
+                f"{p} holds '{meta.get('model_id')}', not {BUNDLE_MODEL_ID} (Qwen3-VL-4B-Instruct)")
+        genie = meta.get("genie") or {}
+        if not genie.get("supports_vision"):
+            raise self._unavailable(f"{p} metadata.json does not declare a vision-capable bundle")
+        needed = list((meta.get("model_files") or {}).keys()) + ["tokenizer.json"]
+        missing = [f for f in needed if not (p / f).is_file()]
+        if missing:
+            raise self._unavailable(f"{p} is incomplete — missing: {', '.join(missing)}")
+        chip = meta.get("chipset_attributes") or {}
+        return {
+            "source": "path", "path": str(p),
+            "model_name": meta.get("model_name") or display_name(self.model_ref),
+            "precision": meta.get("precision") or "",
+            "qairt_version": (meta.get("tool_versions") or {}).get("qairt"),
+            "chipset": chip.get("reference_device") or chip.get("marketing_name") or "unknown",
+            "chipset_name": chip.get("name") or chip.get("marketing_name"),
+            "htp_version": chip.get("htp_version"), "soc_model": chip.get("soc_model"),
+            "context_bins": [f for f in needed if f.endswith(".bin")],
+            "bytes": sum((p / f).stat().st_size for f in needed),
+        }
+
     def _resolve_source(self, gx: Any, evidence: Dict[str, Any]) -> str:
         """The bundle must already be on disk — a multi-GB download never starts
         from inside a chat request."""
         if settings.geniex_model_path:
-            p = Path(settings.geniex_model_path)
-            if not p.exists():
-                raise self._unavailable(f"VF_GENIEX_MODEL_PATH does not exist: {p}")
-            evidence["bundle"] = {"source": "path", "path": str(p)}
-            return str(p)
+            # Already inspected in _load(); GenieX reads metadata.json from it.
+            return str(Path(settings.geniex_model_path))
         key = self.model_ref + (f":{settings.geniex_precision}" if settings.geniex_precision else "")
         try:
             paths = gx.model_manager.get_paths(key)
@@ -329,6 +406,17 @@ class GenieXQwen3VLProvider(ReasoningProvider):
 
     def last_profile(self) -> Dict[str, Any]:
         return dict(self._last_profile)
+
+
+def _host() -> Dict[str, str]:
+    return {"system": platform.system(), "machine": platform.machine(),
+            "python": platform.python_version()}
+
+
+def _same_chipset(detected: Any, bundle: Dict[str, Any]) -> bool:
+    d = str(detected).lower().replace("_", "-")
+    names = {str(bundle.get(k) or "").lower().replace("_", "-") for k in ("chipset_name", "chipset")}
+    return any(n and (n in d or d in n) for n in names)
 
 
 def _safe(fn):

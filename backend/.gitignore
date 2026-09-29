@@ -10,3 +10,5 @@ data/audio/*
 data/reports/*
 data/models/*
 !data/*/.gitkeep
+# Qualcomm AI Hub Models GenieX/QAIRT bundles (multi-GB)
+*-geniex_qairt-*/

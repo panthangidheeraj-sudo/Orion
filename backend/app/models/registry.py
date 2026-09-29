@@ -10,7 +10,7 @@ than asserted (§4, §25).
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from app.config import settings
 from app.logging_setup import get_logger
@@ -22,7 +22,7 @@ from app.models.base import (
     VisionSegmenter, VisionTracker,
 )
 from app.models.classification import EfficientNetOnnxClassifier
-from app.models.geniex import GenieXQwen3VLProvider
+from app.models.geniex import GenieXQwen3VLProvider, display_name as geniex_display_name
 from app.models.embeddings import LexicalHashEmbedder, NomicOnnxEmbedder
 from app.models.ocr import EasyOCRProvider, TrOCROnnxProvider
 from app.models.qwen_vl import LocalOpenAICompatProvider, QwenVLGenAIProvider
@@ -82,7 +82,10 @@ def _candidates() -> Dict[str, List[Candidate]]:
 
 
 NULLS: Dict[str, Callable[[], Adapter]] = {
-    "reasoning": lambda: NoReasoning(settings.reasoning_model_id, "none"),
+    # With GenieX pinned, an unavailable role still names the model it is waiting for.
+    "reasoning": lambda: NoReasoning(
+        geniex_display_name(settings.geniex_model)
+        if settings.reasoning_provider == "geniex-qwen3-vl" else settings.reasoning_model_id, "none"),
     "detector": lambda: NoDetector(settings.detector_model_id, "none"),
     "classifier": lambda: NoClassifier(settings.classifier_model_id, "none"),
     "segmenter": lambda: NoSegmenter(settings.segmenter_model_id, "none"),
@@ -163,6 +166,11 @@ class ModelRegistry:
         with self._lock:
             adapter = self._chosen.get(role)
             if adapter is None or adapter.health().status == base.READY:
+                return
+            # A pinned GenieX bundle doesn't appear on its own, and each attempt
+            # can map gigabytes of context binaries — retry only on an explicit
+            # POST /api/models/reload, never on a status poll.
+            if PREFERENCE[role]() == "geniex-qwen3-vl":
                 return
             now = time.monotonic()
             if now - self._probed_at.get(role, 0.0) < min_interval_s:

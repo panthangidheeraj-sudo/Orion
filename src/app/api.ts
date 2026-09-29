@@ -15,7 +15,18 @@
 import type { DocRef, Detection, Message, Mode, NoticeBlock, OcrTag, Section, SectionKind, Step } from './types'
 import { uid } from './util'
 
-const DEFAULT_BASE = 'http://127.0.0.1:8756'
+const PROD_DEFAULT_BASE = 'http://127.0.0.1:8756'
+
+/**
+ * In dev, calls go out same-origin ('' + '/api/...' → 'http://localhost:5173/api/...')
+ * and Vite's dev-server proxy (vite.config.ts) forwards them to the backend on the
+ * server side. That avoids the browser ever making a direct cross-origin request to
+ * 127.0.0.1:8756 from a page — which some browser extensions and local security
+ * software block outright (net::ERR_BLOCKED_BY_CLIENT) before CORS even applies.
+ * `import.meta.env.DEV` is set by Vite itself, not read from an env file, so this
+ * only changes dev-server behavior; a production build is untouched.
+ */
+const DEFAULT_BASE = import.meta.env.DEV ? '' : PROD_DEFAULT_BASE
 
 export const BACKEND_BASE: string =
   import.meta.env.VITE_VF_BACKEND?.replace(/\/$/, '') || DEFAULT_BASE

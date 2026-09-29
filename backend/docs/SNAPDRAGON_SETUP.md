@@ -96,6 +96,45 @@ geniex-py pull ai-hub-models/Qwen3-VL-4B-Instruct
 set VF_GENIEX_MODEL_PATH=C:\path\to\Qwen3-VL-4B-Instruct
 ```
 
+### Using a bundle downloaded from Qualcomm AI Hub Models
+
+The AI Hub Models export for this model is a folder named like
+`qwen3_vl_4b_instruct-geniex_qairt-w4a16-qualcomm_snapdragon_x_elite`. GenieX
+loads it directly — its `from_pretrained` reads `metadata.json` from a local
+bundle folder and routes it to the VLM path because the metadata declares
+`genie.supports_vision`. Point `VF_GENIEX_MODEL_PATH` at that folder itself
+(put it in `backend\.env`):
+
+```ini
+VF_REASONING_PROVIDER=geniex-qwen3-vl
+VF_GENIEX_MODEL=ai-hub-models/Qwen3-VL-4B-Instruct
+VF_GENIEX_MODEL_PATH=C:/path/to/qwen3_vl_4b_instruct-geniex_qairt-w4a16-qualcomm_snapdragon_x_elite
+VF_GENIEX_DEVICE_MAP=qairt
+VF_GENIEX_PROBE=true
+```
+
+Before anything is loaded Orion checks the folder: `metadata.json` must say
+`runtime: geniex_qairt` and `model_id: qwen3_vl_4b_instruct`, declare vision
+support, and every file it lists (`vision_encoder.bin`, `part1_of_4.bin` …
+`part4_of_4.bin`) plus `tokenizer.json` must be present. The precision
+(`w4a16`), QAIRT version and target chipset are read from the same file and
+shown in `/api/models/status`.
+
+**The bundle is compiled for one SoC.** The `…qualcomm_snapdragon_x_elite`
+export targets Snapdragon X Elite (`soc_model` 60, HTP v73 in
+`htp_backend_ext_config.json`). On an X Plus 8-Core or X2 Elite, download the
+export for that chipset instead.
+
+**It only runs on Windows ARM64.** GenieX ships native runtimes for Windows
+ARM64 and Linux aarch64 only; on an x64 (Intel/AMD) PC the provider reports
+*"asset installed, but local GenieX/QAIRT NPU execution requires a Windows
+ARM64 Snapdragon machine"* and never claims the NPU. Use
+[DEVICE_CLOUD_VALIDATION.md](DEVICE_CLOUD_VALIDATION.md) to validate on a
+hosted Snapdragon device from such a PC.
+
+Keep the folder out of git (about 4 GB) — the backend `.gitignore` excludes
+`*-geniex_qairt-*/` folders.
+
 Optional sanity check outside Orion:
 
 ```bat
@@ -209,7 +248,9 @@ with the reason).
 
 | Status reason | Fix |
 |---|---|
+| `asset installed, but local GenieX/QAIRT NPU execution requires a Windows ARM64 Snapdragon machine` | This PC (or this Python) is x64. Run Orion on the Snapdragon machine with ARM64 Python, or validate remotely with Device Cloud. |
 | `geniex is not importable` | You are on x64 Python or GenieX is not installed in this venv (steps 1–2). |
+| `has no metadata.json` / `is incomplete — missing: …` | `VF_GENIEX_MODEL_PATH` must be the extracted bundle folder itself, with every file present (re-download if a `.bin` is missing). |
 | `QAIRT runtime is not registered` | Reinstall `geniex-qairt`; check `geniex-py devices`. |
 | `not in the GenieX model cache` | Step 3, or set `VF_GENIEX_MODEL_PATH`. |
 | `could not load … with device_map='qairt'` | Unsupported chipset, or an outdated NPU driver. Update Windows / the Qualcomm NPU driver; check `geniex config get chipset`. Run with `set GENIEX_LOG=debug`. |
