@@ -102,6 +102,8 @@ export function Live() {
   /** Real backend responses that actually ran during this session — the only
    * material `endLive()` is allowed to draw from. */
   const analysisMessages = useRef<Message[]>([])
+  /** Spoken questions answered this session (each already in the conversation). */
+  const spokenTurns = useRef(0)
   const capturedEvidence = useRef<Evidence[]>([])
 
   const setVoiceState = useCallback((v: VoiceState) => {
@@ -218,7 +220,9 @@ export function Live() {
     setCapStatus(capsFor(readyRef.current, result.ran))
     if (!result.analysis) return null
     const msg = api.toMessage(result.analysis, 'live')
-    analysisMessages.current = [...analysisMessages.current, msg].slice(-12)
+    // Spoken turns are added to the conversation as their own messages (see ask),
+    // so only background analyses feed the end-of-session summary.
+    if (!question) analysisMessages.current = [...analysisMessages.current, msg].slice(-12)
     // A background analysis (scene change) is shown, never spoken over the user.
     if (!question) {
       const shown = answerText(msg)
@@ -233,6 +237,12 @@ export function Live() {
     if (cam !== 'live' || !sessionId) return
     pollTimer.current = window.setInterval(() => {
       if (busy.current || questionPending.current) return
+      // With no detector or OCR on this backend (the hosted deployment), a background
+      // frame can only wake the reasoning model on a "scene change" — an extra hosted
+      // AI call every few seconds that uses up its rate limit, so the user's own spoken
+      // question then comes back as the no-model fallback. Frames are sent with a question only.
+      const ready = readyRef.current ?? []
+      if (!ready.includes('detector') && !ready.includes('ocr')) return
       busy.current = true
       void sendFrame().finally(() => { busy.current = false })
     }, 1100)
@@ -319,6 +329,11 @@ export function Live() {
       return
     }
     if (turn.current !== myTurn) return
+    if (msg?.kind === 'fallback') {
+      setLines((prev) => [...prev, { who: 'AI', text: 'The reasoning model did not answer this question just now (the hosted AI may be busy or rate-limited). Ask again in a moment.' } as Line].slice(-6))
+      setVoiceState('idle')
+      return
+    }
     const text = msg ? answerText(msg) : ''
     if (!text) {
       setLines((prev) => [...prev, { who: 'AI', text: 'The reasoning model did not answer this frame. Try asking again.' } as Line].slice(-6))
@@ -326,8 +341,13 @@ export function Live() {
       return
     }
     setLines((prev) => [...prev, { who: 'AI', text } as Line].slice(-6))
+    // Record this turn in the conversation exactly once: the question, then its answer.
+    const convoId = activeId ?? newConversation('Live inspection')
+    addMessage(convoId, { id: uid('u'), role: 'user', at: Date.now(), mode: 'live', text: question })
+    if (msg) addMessage(convoId, msg)
+    spokenTurns.current += 1
     say(text, myTurn)
-  }, [cam, sessionId, sendFrame, say, setVoiceState])
+  }, [cam, sessionId, sendFrame, say, setVoiceState, activeId, newConversation, addMessage])
 
   const startListening = useCallback(() => {
     if (voiceRef.current !== 'idle') return
@@ -390,16 +410,7 @@ export function Live() {
     if (sessionId) { void api.liveStop(sessionId); setSessionId(null) }
 
     const convoId = activeId ?? newConversation('Live inspection')
-    const transcript = lines.filter((l) => !l.live)
-    if (transcript.length) {
-      addMessage(convoId, {
-        id: uid('u'),
-        role: 'user',
-        at: Date.now(),
-        mode: 'live',
-        text: transcript.filter((l) => l.who === 'You').map((l) => l.text).join(' ') || 'Live inspection',
-      })
-    }
+    // Each spoken question and its answer were already added as they happened.
 
     const observed: string[] = []
     const inferred: string[] = []
@@ -455,11 +466,12 @@ export function Live() {
       confidenceLabel,
       followUps: verified ? ['Create report'] : undefined,
     }
-    addMessage(convoId, summary)
+    // Spoken answers are already in the thread; don't follow them with "nothing verified".
+    if (verified || !spokenTurns.current) addMessage(convoId, summary)
     toast(
-      verified ? 'Live session added to the conversation' : 'Live session ended — nothing verified',
-      verified
-        ? 'Transcript, detections and findings are all in the same thread.'
+      verified || spokenTurns.current ? 'Live session added to the conversation' : 'Live session ended — nothing verified',
+      verified || spokenTurns.current
+        ? 'Your questions, answers and findings are all in the same thread.'
         : 'No detections or backend analysis were confirmed, so nothing beyond the transcript was added.',
     )
     go('chat')
