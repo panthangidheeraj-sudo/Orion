@@ -77,7 +77,9 @@ export interface BackendInfo {
    * responder; this flag only lets the status strip say why. */
   locked?: boolean
   version?: string
-  model?: { provider: string; model_id: string; accelerator: string; npu: boolean; synthetic: boolean }
+  model?: { provider: string; model_id: string; accelerator: string; npu: boolean; synthetic: boolean; hosted?: boolean }
+  /** Set from /api/models/status `ai`: which kind of AI this backend is configured for. */
+  aiConfigured?: string
   ready?: string[]
   unavailable?: string[]
   synthetic?: string[]
@@ -147,6 +149,7 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
       unavailable: body?.summary?.unavailable ?? [],
       synthetic: body?.summary?.synthetic ?? [],
       npuClaim: Boolean(body?.summary?.npu_claim),
+      aiConfigured: typeof body?.ai?.configured_provider === 'string' ? body.ai.configured_provider : undefined,
       modelReason: reasoning && reasoning.status !== 'ready'
         ? String(reasoning.candidates_tried?.[0]?.reason ?? reasoning.reason ?? '') || undefined
         : undefined,
@@ -157,6 +160,7 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
             accelerator: reasoning.accelerator,
             npu: reasoning.npu,
             synthetic: reasoning.synthetic,
+            hosted: Boolean(reasoning.hosted),
           }
         : undefined,
     }

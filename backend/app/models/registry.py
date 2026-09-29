@@ -23,9 +23,15 @@ from app.models.base import (
 )
 from app.models.classification import EfficientNetOnnxClassifier
 from app.models.geniex import GenieXQwen3VLProvider, display_name as geniex_display_name
+from app.models.hosted import HostedGroqProvider, PROVIDER as HOSTED_PROVIDER
 from app.models.embeddings import LexicalHashEmbedder, NomicOnnxEmbedder
 from app.models.ocr import EasyOCRProvider, TrOCROnnxProvider
 from app.models.qwen_vl import LocalOpenAICompatProvider, QwenVLGenAIProvider
+from app.models import remote
+from app.models.remote import (
+    PROVIDER as REMOTE_PROVIDER, RemoteClassifier, RemoteDetector, RemoteOCR, RemoteSegmenter,
+    RemoteTracker,
+)
 from app.models.runtime import asset_inventory, runtime_info
 from app.models.segmentation import OnnxSegmenter
 from app.models.tracking import CentroidTracker, EdgeTAMTracker
@@ -49,14 +55,21 @@ def _candidates() -> Dict[str, List[Candidate]]:
     # GenieX it reports unavailable in milliseconds, so it can lead the list.
     reasoning: List[Candidate] = [
         ("geniex-qwen3-vl", GenieXQwen3VLProvider),
+        # Groq-hosted model over an OpenAI-compatible API — only when its key is set.
+        (HOSTED_PROVIDER, HostedGroqProvider),
         ("onnxruntime-genai", QwenVLGenAIProvider),
         ("local-openai-compat", LocalOpenAICompatProvider),
     ]
 
     return {
         "reasoning": reasoning,
-        "detector": [("yolo-onnx", YoloOnnxDetector), ("yolo-world-onnx", YoloWorldDetector)],
-        "classifier": [("efficientnet-onnx", EfficientNetOnnxClassifier)],
+        # The trailing remote-vision entries are the Render split: the private
+        # orion-vision service. They sit after every in-process adapter, so a
+        # Snapdragon device (no VF_VISION_URL) behaves exactly as before.
+        "detector": [("yolo-onnx", YoloOnnxDetector), ("yolo-world-onnx", YoloWorldDetector),
+                     (REMOTE_PROVIDER, RemoteDetector)],
+        "classifier": [("efficientnet-onnx", EfficientNetOnnxClassifier),
+                       (REMOTE_PROVIDER, RemoteClassifier)],
         # §3 lists SAM2, MobileSAM and YOLO11-Seg as segmentation candidates. They
         # share the ONNX session path, so each is the same adapter pointed at a
         # different exported asset — selectable by name, not hard-wired.
@@ -64,13 +77,18 @@ def _candidates() -> Dict[str, List[Candidate]]:
             ("onnx-seg", lambda: OnnxSegmenter(settings.segmenter_model_id)),
             ("sam2-onnx", lambda: OnnxSegmenter("sam2")),
             ("mobilesam-onnx", lambda: OnnxSegmenter("mobilesam")),
+            (REMOTE_PROVIDER, RemoteSegmenter),
         ],
         "tracker": [
             ("edgetam-onnx", lambda: EdgeTAMTracker(settings.tracker_model_id)),
             ("track-anything-onnx", lambda: EdgeTAMTracker("track_anything")),
             ("cpu-classical", CentroidTracker),
+            # After the free classical tracker on purpose: "auto" never pays a network
+            # hop for it. Pin VF_TRACKER_PROVIDER=remote-vision to use the service's.
+            (REMOTE_PROVIDER, RemoteTracker),
         ],
-        "ocr": [("easyocr", EasyOCRProvider), ("trocr-onnx", TrOCROnnxProvider)],
+        "ocr": [("easyocr", EasyOCRProvider), ("trocr-onnx", TrOCROnnxProvider),
+                (REMOTE_PROVIDER, RemoteOCR)],
         "embedding": [
             ("nomic-onnx", lambda: NomicOnnxEmbedder(settings.embedding_model_id)),
             ("minilm-onnx", lambda: NomicOnnxEmbedder("minilm_v2", dim=384)),
@@ -85,7 +103,9 @@ NULLS: Dict[str, Callable[[], Adapter]] = {
     # With GenieX pinned, an unavailable role still names the model it is waiting for.
     "reasoning": lambda: NoReasoning(
         geniex_display_name(settings.geniex_model)
-        if settings.reasoning_provider == "geniex-qwen3-vl" else settings.reasoning_model_id, "none"),
+        if settings.reasoning_provider == "geniex-qwen3-vl"
+        else settings.hosted_llm_model if settings.reasoning_provider == HOSTED_PROVIDER
+        else settings.reasoning_model_id, "none"),
     "detector": lambda: NoDetector(settings.detector_model_id, "none"),
     "classifier": lambda: NoClassifier(settings.classifier_model_id, "none"),
     "segmenter": lambda: NoSegmenter(settings.segmenter_model_id, "none"),
@@ -149,6 +169,12 @@ class ModelRegistry:
                          role, name, h.model_id, h.accelerator, h.npu, h.synthetic)
                 return adapter
         self._attempts[role] = attempts
+        if role in remote.VISION_ROLES and remote.configured() and pref in ("", "auto", REMOTE_PROVIDER):
+            # The vision service is configured but not ready right now. Keep the remote
+            # adapter: its health is live, so the role reports the real reason and
+            # turns READY by itself when the service comes back — never before.
+            factory = next(f for n, f in _candidates()[role] if n == REMOTE_PROVIDER)
+            return factory()
         log.warning("role=%s has no working adapter; degrading per spec §25", role)
         return NULLS[role]()
 
@@ -182,6 +208,7 @@ class ModelRegistry:
         with self._lock:
             self._chosen.clear()
             self._attempts.clear()
+        remote.client.reset()
         runtime_info(refresh=True)
 
     # ------------------------------------------------------ typed accessors
@@ -213,6 +240,29 @@ class ModelRegistry:
         return self.get("tts")  # type: ignore[return-value]
 
     # ------------------------------------------------------------- reporting
+    @staticmethod
+    def _ai(r: Dict[str, Any]) -> Dict[str, Any]:
+        """The one-glance answer to "what is answering, and where does it run?"."""
+        ready = r.get("status") == base.READY
+        hosted = bool(r.get("hosted"))
+        npu = bool(r.get("npu")) and not hosted
+        return {
+            "status": r.get("status", base.UNAVAILABLE),
+            "mode": ("hosted" if hosted else "local") if ready else "unavailable",
+            "provider": r.get("provider"),
+            # What this deployment is configured to use ("auto" when it decides at runtime).
+            "configured_provider": settings.reasoning_provider,
+            "model_id": r.get("model_id"),
+            "accelerator": r.get("accelerator", "none"),
+            "npu": npu,
+            "hosted": hosted,
+            "synthetic": bool(r.get("synthetic")),
+            # The real cause is on the candidate that was tried, not on the placeholder.
+            "reason": None if ready else next(
+                (c["reason"] for c in r.get("candidates_tried", []) if c.get("reason")),
+                r.get("reason")),
+        }
+
     def status(self) -> Dict[str, Any]:
         # A local model server may have come up since the last probe.
         self.refresh_if_unavailable("reasoning")
@@ -229,13 +279,17 @@ class ModelRegistry:
         synthetic = [r for r, v in roles.items() if v.get("synthetic")]
         npu = [r for r, v in roles.items() if v.get("npu")]
         return {
+            "ai": self._ai(roles.get("reasoning", {})),
             "roles": roles,
+            # The private vision service, when this deployment uses one.
+            "services": {"vision": remote.client.summary()},
             "summary": {
                 "ready": ready,
                 "unavailable": [r for r in roles if r not in ready],
                 "synthetic": synthetic,
                 "npu_accelerated": npu,
                 "npu_claim": bool(npu),
+                "hosted": [r for r, v in roles.items() if v.get("hosted")],
             },
             "runtime": runtime_info().to_dict(),
             "assets": asset_inventory(),

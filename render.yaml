@@ -1,0 +1,82 @@
+# Orion on Render — public API + private vision service.
+#
+# Both services are in the SAME region and the SAME workspace, which is what
+# Render requires for private networking. orion-vision is a private service
+# (pserv): it has no public URL and can only be reached at its internal
+# hostname. It is still authenticated at the application layer with
+# VF_INTERNAL_KEY.
+#
+# Nothing secret and no model file is in this file. Values marked sync:false
+# are entered in the Render dashboard the first time the Blueprint is applied.
+#
+# The frontend is not part of this file (deploy it as a static site or on any
+# static host); point VF_CORS_ORIGINS below at its origin.
+
+envVarGroups:
+  - name: orion-internal
+    envVars:
+      # Generated once by Render, shared by both services, never committed.
+      - key: VF_INTERNAL_KEY
+        generateValue: true
+
+services:
+  # ------------------------------------------------------------ public API
+  - type: web
+    name: orion-api
+    runtime: python
+    region: oregon
+    plan: 0.5c-512mb              # raise to 1c-2g if the API runs out of memory
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - fromGroup: orion-internal
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: PORT
+        value: "10000"
+      - key: VF_HOST
+        value: 0.0.0.0
+      - key: VF_TRUST_PROXY_HEADERS
+        value: "true"
+      - key: VF_EPHEMERAL_STORAGE      # Render disk is wiped on restart; Firebase holds the real data
+        value: "true"
+      # Hosted reasoning (Groq). The key is server-side only.
+      - key: VF_REASONING_PROVIDER
+        value: hosted-groq
+      - key: VF_HOSTED_LLM_MODEL
+        value: qwen/qwen3.8-27b
+      - key: GROQ_API_KEY
+        sync: false
+      # Browser access key for the API, and the frontend's origin(s).
+      - key: VF_ACCESS_TOKEN
+        sync: false
+      - key: VF_CORS_ORIGINS           # JSON list, e.g. ["https://your-frontend.example"]
+        sync: false
+      # Private vision service: "orion-vision:10000" (host:port, no scheme).
+      - key: VF_VISION_URL
+        fromService:
+          type: pserv
+          name: orion-vision
+          property: hostport
+
+  # -------------------------------------------------- private vision service
+  - type: pserv
+    name: orion-vision
+    runtime: python
+    region: oregon                # must equal orion-api's region
+    plan: 1c-2g                   # 0.5c-512mb is too small for ONNX vision models
+    rootDir: backend
+    buildCommand: pip install -r requirements-vision.txt
+    startCommand: uvicorn app.vision_service:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - fromGroup: orion-internal
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: PORT
+        value: "10000"
+      - key: VF_ONNX_EXECUTION_PROVIDERS     # Render has no NPU: CPU only
+        value: '["CPUExecutionProvider"]'
+      - key: VF_INTERNAL_MAX_CONCURRENCY
+        value: "2"

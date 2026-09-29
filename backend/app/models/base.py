@@ -42,13 +42,19 @@ class ModelHealth:
     accelerator: str = "none"
     npu: bool = False
     synthetic: bool = False
+    # True when the model runs on a remote inference provider, not this machine.
+    hosted: bool = False
     reason: Optional[str] = None
     asset_path: Optional[str] = None
     load_ms: Optional[float] = None
     detail: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # A hosted model never runs on this device's NPU, whatever an adapter says.
+        if d["hosted"]:
+            d["npu"] = False
+        return d
 
 
 class Adapter(abc.ABC):

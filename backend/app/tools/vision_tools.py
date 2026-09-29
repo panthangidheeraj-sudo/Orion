@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.tool_registry import registry as tools
 from app.config import settings
-from app.errors import NotFound, ToolError
+from app.errors import ModelUnavailable, NotFound, ToolError
 from app.logging_setup import get_logger
 from app.memory import sqlite as db
 from app.models._imaging import image_stats
@@ -73,7 +73,12 @@ async def vision_detect(image_id: Optional[str] = None, context: Dict[str, Any] 
                 "degraded": True, "model": h.model_id,
                 "reason": h.reason or "no detector available",
                 "fallback": "the reasoning model inspects the image directly"}
-    detections = await detector.detect(ref)
+    try:
+        detections = await detector.detect(ref)
+    except ModelUnavailable as exc:  # e.g. the remote vision service dropped mid-call
+        return {"detections": [], "image": {**stats, "image_id": ref.id}, "degraded": True,
+                "model": detector.model_id, "reason": exc.reason,
+                "fallback": "the reasoning model inspects the image directly"}
     return {"detections": detections, "count": len(detections),
             "image": {**stats, "image_id": ref.id},
             "model": detector.model_id,
@@ -110,7 +115,12 @@ async def vision_classify(image_id: Optional[str] = None, bbox: Optional[List[fl
         if detections:
             bbox = detections[0].get("bbox")
 
-    results = await classifier.classify(ref, bbox)
+    try:
+        results = await classifier.classify(ref, bbox)
+    except ModelUnavailable as exc:
+        return {"classifications": [], "skipped": True, "degraded": True, "image_id": ref.id,
+                "bbox": bbox, "model": classifier.model_id, "reason": exc.reason,
+                "fallback": "detector label plus the reasoning model's own reading"}
     return {"classifications": results, "count": len(results), "image_id": ref.id,
             "bbox": bbox, "model": classifier.model_id,
             "accelerator": classifier.health().accelerator}
@@ -132,7 +142,12 @@ async def vision_segment(image_id: Optional[str] = None, target: Optional[str] =
         return {"segmented": False, "image_id": ref.id, "target": target, "degraded": True,
                 "reason": seg.health().reason or "no segmentation model available",
                 "fallback": "detector bounding box"}
-    return {"segmented": True, **(await seg.segment(ref, target)), "image_id": ref.id}
+    try:
+        result = await seg.segment(ref, target)
+    except ModelUnavailable as exc:
+        return {"segmented": False, "image_id": ref.id, "target": target, "degraded": True,
+                "reason": exc.reason, "fallback": "detector bounding box"}
+    return {"segmented": True, **result, "image_id": ref.id}
 
 
 @tools.tool(
@@ -160,7 +175,10 @@ async def vision_track(image_id: Optional[str] = None, target_label: Optional[st
             state["target"] = {"label": match["label"], "bbox": match["bbox"],
                                "confidence": match["confidence"], "misses": 0,
                                "track_id": "track_1"}
-    return await tracker.track(ref, state)
+    try:
+        return await tracker.track(ref, state)
+    except ModelUnavailable as exc:
+        return {"tracked": False, "degraded": True, "reason": exc.reason}
 
 
 @tools.tool(
@@ -176,7 +194,11 @@ async def ocr_extract(image_id: Optional[str] = None, context: Dict[str, Any] = 
         return {"text_regions": [], "degraded": True, "image_id": ref.id,
                 "reason": ocr.health().reason or "no OCR provider available",
                 "fallback": "the reasoning model reads the label visually"}
-    regions = await ocr.extract(ref)
+    try:
+        regions = await ocr.extract(ref)
+    except ModelUnavailable as exc:
+        return {"text_regions": [], "degraded": True, "image_id": ref.id, "reason": exc.reason,
+                "fallback": "the reasoning model reads the label visually"}
     return {"text_regions": regions, "count": len(regions), "image_id": ref.id,
             "joined_text": " ".join(r["text"] for r in regions)[:2000],
             "model": ocr.model_id, "accelerator": ocr.health().accelerator}

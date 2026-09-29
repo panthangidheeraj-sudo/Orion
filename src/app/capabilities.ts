@@ -38,15 +38,21 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
     && !model?.synthetic
     && (backend.ready ?? []).includes('reasoning')
     && !(backend.synthetic ?? []).includes('reasoning')
+  // Hosted AI (the Render deployment) is named as such and never described as
+  // on-device or as running on the NPU; the backend already reports npu=false.
+  const hosted = aiReady ? Boolean(model?.hosted) : /hosted/i.test(backend.aiConfigured ?? '')
+  const aiLabel = hosted ? 'Hosted AI' : 'Local AI'
   const aiCap: Capability = checking
     ? { key: 'ai', label: 'Local AI', state: 'busy', word: 'Checking', detail: 'Waiting for the backend’s model report…' }
     : aiReady
       ? {
-          key: 'ai', label: 'Local AI', state: 'ready', word: 'Ready',
-          detail: `${model!.model_id} · ${model!.provider} · ${model!.npu ? 'NPU' : model!.accelerator.toUpperCase()}`,
+          key: 'ai', label: aiLabel, state: 'ready', word: 'Ready',
+          detail: hosted
+            ? `${model!.model_id} · hosted inference — runs on the provider’s servers, not on this device or a Snapdragon NPU. Photos you send are uploaded for that turn.`
+            : `${model!.model_id} · ${model!.provider} · ${model!.npu ? 'NPU' : model!.accelerator.toUpperCase()}`,
         }
       : {
-          key: 'ai', label: 'Local AI', state: 'error', word: 'Unavailable',
+          key: 'ai', label: aiLabel, state: 'error', word: 'Unavailable',
           detail: backend.locked
             ? 'Locked — the backend’s model can’t be used until the access key is entered.'
             : !backend.online

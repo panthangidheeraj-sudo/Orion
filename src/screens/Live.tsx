@@ -18,7 +18,13 @@ import type { Detection, DocRef, Evidence, Message, OcrTag } from '../app/types'
 type CapState = 'unavailable' | 'idle' | 'active'
 interface CapStatus { detector: CapState; ocr: CapState; tracker: CapState; reasoning: CapState }
 const CAP_UNAVAILABLE: CapStatus = { detector: 'unavailable', ocr: 'unavailable', tracker: 'unavailable', reasoning: 'unavailable' }
-const CAP_IDLE: CapStatus = { detector: 'idle', ocr: 'idle', tracker: 'idle', reasoning: 'idle' }
+/** A role is only ever shown as idle/running when /api/models/status listed it as
+ * ready — a role whose backend or remote service is not READY stays "unavailable". */
+function capsFor(ready: readonly string[] | undefined, ran?: Partial<Record<keyof CapStatus, boolean>>): CapStatus {
+  const one = (r: keyof CapStatus): CapState =>
+    !ready?.includes(r) ? 'unavailable' : ran?.[r] ? 'active' : 'idle'
+  return { detector: one('detector'), ocr: one('ocr'), tracker: one('tracker'), reasoning: one('reasoning') }
+}
 
 function CapChip({ name, state }: { name: string; state: CapState }) {
   const colour = state === 'active' ? '#7cf29a' : state === 'idle' ? 'rgba(255,255,255,.4)' : 'rgba(255,158,150,.85)'
@@ -44,6 +50,8 @@ export function Live() {
   const [detections, setDetections] = useState<Detection[]>([])
   const [ocrTags, setOcrTags] = useState<OcrTag[]>([])
   const [capStatus, setCapStatus] = useState<CapStatus>(CAP_UNAVAILABLE)
+  const readyRef = useRef<readonly string[] | undefined>(backend.ready)
+  readyRef.current = backend.ready
   const [sessionId, setSessionId] = useState<string | null>(null)
 
   const stageRef = useRef<CameraStageHandle | null>(null)
@@ -164,7 +172,7 @@ export function Live() {
 
   useEffect(() => {
     if (cam !== 'live' || !backend.online) {
-      setCapStatus(backend.online ? CAP_IDLE : CAP_UNAVAILABLE)
+      setCapStatus(backend.online ? capsFor(readyRef.current) : CAP_UNAVAILABLE)
       setSessionId(null)
       return
     }
@@ -173,7 +181,7 @@ export function Live() {
       .then((session) => {
         if (cancelled) { void api.liveStop(session.sessionId); return }
         setSessionId(session.sessionId)
-        setCapStatus(CAP_IDLE)
+        setCapStatus(capsFor(readyRef.current))
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -200,12 +208,7 @@ export function Live() {
       erroredOnce.current = false
       setDetections(api.detectionsFromLive(result.detections))
       setOcrTags(api.ocrFromLive(result.textRegions, frame.width, frame.height))
-      setCapStatus({
-        detector: result.ran.detector ? 'active' : 'idle',
-        ocr: result.ran.ocr ? 'active' : 'idle',
-        tracker: result.ran.tracker ? 'active' : 'idle',
-        reasoning: result.ran.reasoning ? 'active' : 'idle',
-      })
+      setCapStatus(capsFor(readyRef.current, result.ran))
       if (result.analysis) {
         const msg = api.toMessage(result.analysis, 'live')
         analysisMessages.current = [...analysisMessages.current, msg].slice(-12)

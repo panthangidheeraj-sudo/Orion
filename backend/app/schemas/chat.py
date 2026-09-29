@@ -55,6 +55,7 @@ class ModelInfo(BaseModel):
     accelerator: str
     npu: bool
     synthetic: bool
+    hosted: bool = False
 
 
 class ChatResponse(BaseModel):

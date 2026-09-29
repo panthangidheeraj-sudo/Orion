@@ -277,8 +277,8 @@ export function useCloudSync(deps: Deps): Cloud {
       const meta = readMeta() ?? { profileHash: '', profileAt: 0, settingsHash: '', settingsAt: 0 }
 
       const { profile: p, access: a } = mergeProfile(cur.profile, cur.access, meta.profileAt, remote.profile)
-      // A signed-in Google name fills an empty profile name.
-      const profile = !p.name.trim() && user.displayName ? { ...p, name: user.displayName } : p
+      // The Google name is the account identity only — it never fills or overwrites the profile name.
+      const profile = p
       const prefs = mergeSettings(cur.prefs, meta.settingsAt, remote.settings)
       const conversations = mergeConversations(cur.conversations, remote.conversations)
 

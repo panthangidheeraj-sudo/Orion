@@ -9,11 +9,10 @@ import type { SyncPhase } from '../app/cloudSync'
 const VERSION = '1.0.0'
 const BUILD = '2026.09.19 · sd-arm64'
 
-type CategoryId = 'profile' | 'account' | 'appearance' | 'privacy' | 'status' | 'about'
+type CategoryId = 'profile' | 'appearance' | 'privacy' | 'status' | 'about'
 
 const CATEGORIES: { id: CategoryId; label: string; icon: string }[] = [
   { id: 'profile', label: 'Profile', icon: 'user' },
-  { id: 'account', label: 'Account', icon: 'lock' },
   { id: 'appearance', label: 'Appearance', icon: 'moon' },
   { id: 'privacy', label: 'AI access & privacy', icon: 'eye' },
   { id: 'status', label: 'System status', icon: 'cpu' },
@@ -35,6 +34,7 @@ export function Settings() {
   const { profile, setProfile, access, setAccess, prefs, setPrefs, files, toast, backend, refreshBackend, cloud } = useStore()
   const { account, sync, busy: cloudBusy } = cloud
   const signedIn = account.status === 'signedIn'
+  const hostedAi = Boolean(backend.online && backend.model?.hosted)
   const syncWord = sync.phase === 'synced' && sync.at
     ? `Synced ${new Date(sync.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : SYNC_WORD[sync.phase]
@@ -56,7 +56,77 @@ export function Settings() {
     profile: (
       <>
         <h2>Profile</h2>
-        <p className="lead">Used for report headers and to pitch the assistant’s guidance at your level.</p>
+        <p className="lead">
+          Your Google account and the details Orion uses for report headers and to pitch guidance at your level.
+        </p>
+
+        <section className="id-card" aria-label="Account">
+          {account.status === 'signedIn' ? (
+            <>
+              <div className="id-row">
+                {account.user.photoURL
+                  ? <img className="id-photo" src={account.user.photoURL} alt="" width={48} height={48} referrerPolicy="no-referrer" />
+                  : <span className="id-photo" aria-hidden="true"><Icon name="user" size={22} stroke="var(--vf-text-2)" width={1.7} /></span>}
+                <div className="id-who">
+                  <b>{account.user.displayName ?? 'Google account'}</b>
+                  {account.user.email && <span>{account.user.email}</span>}
+                </div>
+                <Chip icon="check" tone="ok" size="sm">Signed in</Chip>
+              </div>
+              <div className="id-sync">
+                <Status label="" state={SYNC_STATE[sync.phase]} word={syncWord} />
+                <Cap style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+                  {sync.phase === 'error'
+                    ? `${sync.detail ?? 'Cloud sync is paused.'} Your profile is saved on this device — fix the rules, then press Sync now.`
+                    : sync.detail ?? 'Profile, settings and conversations back up to this account.'}
+                </Cap>
+                <div className="id-actions">
+                  <button type="button" className="btn" disabled={cloudBusy || sync.phase === 'syncing'} onClick={() => cloud.syncNow()}>
+                    <Icon name="refresh" size={16} width={1.8} />
+                    Sync now
+                  </button>
+                  <button type="button" className="btn ghost" disabled={cloudBusy} onClick={() => { void cloud.signOut() }}>
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="id-row">
+              <span className="id-photo" aria-hidden="true"><Icon name="lock" size={20} stroke="var(--vf-ok)" width={1.7} /></span>
+              <div className="id-who">
+                <b>{account.status === 'loading' ? 'Checking your account…' : 'Signed out'}</b>
+                <span>{account.status === 'unconfigured' ? 'Cloud sign-in isn’t set up in this build' : 'Working on this device only'}</span>
+              </div>
+              {account.status !== 'unconfigured' && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={account.status !== 'signedOut' || cloudBusy}
+                  onClick={() => { void cloud.signIn() }}
+                >
+                  <Icon name="google" size={18} stroke={account.status === 'signedOut' ? 'var(--vf-text)' : 'var(--vf-muted)'} />
+                  {cloudBusy ? 'Waiting for Google…' : 'Continue with Google'}
+                </button>
+              )}
+            </div>
+          )}
+          <p className="id-note">
+            <Icon name="shield" size={14} stroke="var(--vf-muted)" width={1.8} />
+            <span>
+              {account.status === 'signedIn'
+                ? 'This is only your sign-in identity. Your Orion profile below is separate and you can name it anything — it is never overwritten by your Google name. '
+                + (hostedAi
+                  ? 'The hosted AI receives your messages and any photo you attach for that turn; documents, audio and the engine’s memory stay on the server or this device, never in your Google account.'
+                  : 'Documents, photos, camera frames, audio and the engine’s memory never leave this device.')
+                : account.status === 'unconfigured'
+                  ? 'Everything stays on this device.'
+                  : 'Signing in is optional. It backs up your profile, settings and conversations to your Google account; signing out keeps everything here.'}
+            </span>
+          </p>
+        </section>
+
+        <h3 className="sub-h">Your profile</h3>
         <div className="profile-top">
           <span className="profile-avatar" aria-hidden="true">
             {profile.name.trim()
@@ -66,85 +136,24 @@ export function Settings() {
           <div className="profile-fields">
             <div className="field-row">
               {field('name', 'Full name', 'Your name')}
-              {field('age', 'Age', 'Optional')}
+              {field('age', 'Age (optional)', 'Optional')}
             </div>
+            {signedIn && !profile.name.trim() && account.status === 'signedIn' && account.user.displayName && (
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => account.status === 'signedIn' && setProfile({ ...profile, name: account.user.displayName ?? '' })}
+              >
+                Use my Google name ({account.user.displayName})
+              </button>
+            )}
             {field('profession', 'Profession', 'e.g. Field service technician — rotating equipment')}
             <div className="field-row">
-              {field('experience', 'Experience', 'e.g. 3 years')}
-              {field('site', 'Site / employer', 'Appears on report headers')}
+              {field('experience', 'Years of experience', 'e.g. 3 years')}
+              {field('site', 'Site / employer (optional)', 'Appears on report headers')}
             </div>
+            <Cap>{signedIn ? 'Saved on this device instantly, and synced to your account.' : 'Saved on this device instantly.'}</Cap>
           </div>
-        </div>
-      </>
-    ),
-    account: (
-      <>
-        <h2>Account</h2>
-        <p className="lead">Optional. Orion works fully on this device without an account.</p>
-        {account.status === 'signedIn' ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'var(--vf-track)', border: '1px solid var(--vf-border)', borderRadius: 13, marginBottom: 12 }}>
-              {account.user.photoURL
-                ? <img src={account.user.photoURL} alt="" width={36} height={36} referrerPolicy="no-referrer" style={{ borderRadius: '50%', flex: 'none', objectFit: 'cover' }} />
-                : <span style={{ width: 36, height: 36, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'var(--vf-inset)', flex: 'none' }}><Icon name="user" size={18} stroke="var(--vf-text-2)" width={1.7} /></span>}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontSize: 13.5 }}>{account.user.displayName ?? 'Google account'}</b>
-                {account.user.email && (
-                  <div style={{ fontSize: 12, color: 'var(--vf-muted)', marginTop: 2, overflowWrap: 'anywhere' }}>{account.user.email}</div>
-                )}
-              </div>
-              <Chip icon="check" tone="ok" size="sm">Signed in</Chip>
-            </div>
-            <div className="status-row" style={{ marginBottom: 12 }}>
-              <Icon name="refresh" size={19} stroke="var(--vf-text-2)" width={1.7} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontSize: 13.5 }}>Cloud sync</b>
-                <Cap style={{ marginTop: 2, overflowWrap: 'anywhere' }}>
-                  {sync.detail ?? 'Profile, settings and conversations'}
-                </Cap>
-              </div>
-              <Status label="" state={SYNC_STATE[sync.phase]} word={syncWord} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn" disabled={cloudBusy || sync.phase === 'syncing'} onClick={() => cloud.syncNow()}>
-                <Icon name="refresh" size={16} width={1.8} />
-                Sync now
-              </button>
-              <button type="button" className="btn ghost" disabled={cloudBusy} onClick={() => { void cloud.signOut() }}>
-                Sign out
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'var(--vf-track)', border: '1px solid var(--vf-border)', borderRadius: 13, marginBottom: 12 }}>
-              <Icon name="lock" size={19} stroke="var(--vf-ok)" width={1.7} />
-              <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 13.5 }}>Local profile</b>
-                <div style={{ fontSize: 12, color: 'var(--vf-muted)', marginTop: 2 }}>Stored on this device · not signed in</div>
-              </div>
-              <Chip icon="check" tone="ok" size="sm">Active</Chip>
-            </div>
-            <button
-              type="button"
-              className="btn wide"
-              disabled={account.status !== 'signedOut' || cloudBusy}
-              onClick={() => { void cloud.signIn() }}
-            >
-              <Icon name="google" size={18} stroke={account.status === 'signedOut' ? 'var(--vf-text)' : 'var(--vf-muted)'} />
-              {cloudBusy ? 'Waiting for Google…' : account.status === 'loading' ? 'Checking your account…' : 'Continue with Google'}
-            </button>
-          </>
-        )}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12 }}>
-          <Icon name="shield" size={14} stroke="var(--vf-muted)" width={1.8} />
-          <span style={{ fontSize: 12, color: 'var(--vf-muted)', lineHeight: 1.55 }}>
-            {account.status === 'unconfigured'
-              ? 'Cloud sign-in isn’t set up in this build (no Firebase config). Everything stays on this device.'
-              : 'Signing in backs up your profile, settings and conversations to your Google account. '
-                + 'Documents, photos, camera frames, audio and the engine’s memory never leave this device. '
-                + 'Signing out keeps everything here.'}
-          </span>
         </div>
       </>
     ),
@@ -217,8 +226,8 @@ export function Settings() {
     status: (
       <>
         <h2>System status</h2>
-        <p className="lead">What is available on this device right now — read from the local
-        engine, not assumed.</p>
+        <p className="lead">What is available right now — read from the
+        backend, not assumed.</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {systemCapabilities(backend, prefs.webSearch).map((c) => (
             <div key={c.key} className="status-row">
@@ -304,7 +313,7 @@ export function Settings() {
       <section className="panel settings-shell">
         <header className="settings-head">
           <h1>Profile &amp; Settings</h1>
-          <Cap>{signedIn ? 'Synced to your Google account · files and camera stay on this device' : 'Everything on this page stays on this device'}</Cap>
+          <Cap>{signedIn ? (hostedAi ? 'Synced to your Google account · documents stay out of the cloud' : 'Synced to your Google account · files and camera stay on this device') : 'Everything on this page stays on this device'}</Cap>
         </header>
 
         <div className="settings-body">

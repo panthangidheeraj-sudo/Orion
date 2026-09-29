@@ -622,6 +622,18 @@ input, textarea { font: inherit; color: inherit; }
 .settings-panel .theme-opt { background: var(--vf-track); border-color: var(--vf-border-strong); }
 .settings-panel .theme-opt[aria-pressed='true'] { background: var(--vf-hover); border: 2px solid var(--vf-text); }
 .settings-panel .btn { background: var(--vf-track); }
+.id-card { background: var(--vf-track); border: 1px solid var(--vf-border); border-radius: 15px; padding: 14px 16px; margin-bottom: 22px; }
+.id-row { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.id-photo { width: 48px; height: 48px; flex: none; border-radius: 50%; object-fit: cover; display: grid; place-items: center; background: var(--vf-inset); border: 1px solid var(--vf-border); }
+.id-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.id-who b { font-size: 14.5px; overflow-wrap: anywhere; }
+.id-who span { font-size: 12.5px; color: var(--vf-muted); overflow-wrap: anywhere; }
+.id-sync { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--vf-border); }
+.id-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.id-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 12px; color: var(--vf-muted); line-height: 1.55; }
+.id-note svg { flex: none; margin-top: 2px; }
+.sub-h { margin: 0 0 14px; font-size: 14px; font-weight: 600; }
+.link-btn { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--vf-text-2); font-size: 12.5px; text-decoration: underline; cursor: pointer; }
 .profile-top { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
 .profile-avatar {
   display: grid; place-items: center; width: 88px; height: 88px; flex: none;
@@ -834,6 +846,10 @@ input, textarea { font: inherit; color: inherit; }
   .settings-sidebar::-webkit-scrollbar { display: none; }
   .settings-navitem { flex: none; width: auto; min-height: 44px; }
   .settings-panel { padding: 2px 0 12px; }
+  .id-row { flex-wrap: wrap; }
+  .id-row > .btn { width: 100%; justify-content: center; }
+  .id-actions { width: 100%; }
+  .id-actions .btn { flex: 1; justify-content: center; }
   .profile-top { gap: 14px; }
   .profile-avatar { width: 56px; height: 56px; border-radius: 16px; font-size: 18px; }
   .profile-fields { flex-basis: 100%; gap: 12px; }

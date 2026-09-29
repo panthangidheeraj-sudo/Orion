@@ -22,6 +22,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Sequence
 
+from app.config import settings
 from app.errors import NotFound, ValidationFailed
 from app.logging_setup import get_logger
 from app.memory import sqlite as db
@@ -31,6 +32,7 @@ from app.models.registry import registry
 from app.util import new_id, preview, utc_now
 
 log = get_logger(__name__)
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_\-]{6,64}$")
 
 # Phrases that mark a statement as not yet established.  §13: do not store
 # temporary guesses, hallucinated diagnoses or unconfirmed speculation.
@@ -155,7 +157,20 @@ def get_conversation(conversation_id: str) -> Dict[str, Any]:
 
 def ensure_conversation(conversation_id: Optional[str], title: Optional[str] = None) -> Dict[str, Any]:
     if conversation_id:
-        return get_conversation(conversation_id)
+        try:
+            return get_conversation(conversation_id)
+        except NotFound:
+            # On a host whose disk is wiped on restart (Render) the user's real
+            # conversation lives in Firebase; this table is only a cache. Adopt
+            # the client's id instead of failing every turn after a restart.
+            if not (settings.ephemeral_storage and _SAFE_ID.match(conversation_id)):
+                raise
+            now = utc_now()
+            row = {"id": conversation_id, "user_id": ensure_user()["id"],
+                   "title": (title or "New inspection").strip()[:160],
+                   "created_at": now, "updated_at": now}
+            db.insert("conversations", row)
+            return row
     return create_conversation(title)
 
 

@@ -188,7 +188,7 @@ def test_streaming_emits_trail_then_text(client, manual_pdf, llm):
 def test_every_response_declares_which_model_produced_it(client):
     body = client.post("/api/chat", json={"message": "The pump is leaking."}).json()
     model = body["model"]
-    assert set(model) == {"provider", "model_id", "accelerator", "npu", "synthetic"}
+    assert set(model) == {"provider", "model_id", "accelerator", "npu", "synthetic", "hosted"}
     if model["synthetic"]:
         assert model["npu"] is False
 

@@ -38,6 +38,8 @@ async def system_status() -> Dict[str, Any]:
         row = db.query_one(f"SELECT COUNT(*) AS n FROM {table}")
         counts[table] = (row or {}).get("n", 0)
 
+    reasoning = models.get("reasoning").health()
+    hosted = bool(reasoning.hosted and reasoning.status == "ready")
     return {
         "status": "ok",
         "app": "Orion backend",
@@ -45,12 +47,19 @@ async def system_status() -> Dict[str, Any]:
         "uptime_s": round(time.time() - STARTED_AT, 1),
         "local_first": {
             "cloud_documents": False,
-            "cloud_camera_frames": False,
+            # Hosted AI can only answer about a photo it is sent, so on that path the
+            # photos/frames of a turn go to the inference provider — say so.
+            "cloud_camera_frames": hosted,
             "cloud_audio": False,
             "cloud_memory": False,
             "web_research": ws.get_provider().status(),
-            "note": "Nothing leaves this machine unless web research is explicitly "
-                    "enabled, and then only the search query (§24).",
+            "ai_hosted": hosted,
+            "note": ("Hosted AI is active: your messages and any photo or camera frame you "
+                     "attach are sent to the configured inference provider for that turn. "
+                     "Documents, audio, model files and this server's database are not."
+                     if hosted else
+                     "Nothing leaves this machine unless web research is explicitly "
+                     "enabled, and then only the search query (§24)."),
         },
         "storage": {
             "data_dir": str(settings.data_dir),

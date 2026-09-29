@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -143,6 +143,37 @@ class Settings(BaseSettings):
     # unless a URL is set — nothing is probed by default.
     local_llm_url: str = ""
     local_llm_model: str = ""
+
+    # Hosted AI for a deployment that is not a Snapdragon machine (Render):
+    # Groq's OpenAI-compatible API (VF_REASONING_PROVIDER=hosted-groq, or "auto"
+    # after GenieX). Read from the server's environment only. The provider is
+    # used only when a key is set. The key may be given as GROQ_API_KEY or
+    # VF_HOSTED_LLM_API_KEY; neither is ever returned by an endpoint or logged.
+    hosted_llm_base_url: str = "https://api.groq.com/openai/v1"
+    hosted_llm_api_key: str = Field(
+        default="", validation_alias=AliasChoices("VF_HOSTED_LLM_API_KEY", "GROQ_API_KEY"))
+    hosted_llm_model: str = "qwen/qwen3.8-27b"
+    hosted_llm_timeout_s: float = 120.0
+    # The model can think before it answers. "none" skips that (fast, clean JSON
+    # for the router); "hidden" keeps any reasoning out of the reply. Blank = unset.
+    hosted_llm_reasoning_effort: str = "none"
+    hosted_llm_reasoning_format: str = "hidden"
+
+    # True on hosts whose disk is wiped on restart (Render). Conversation
+    # history is then a cache; the user's real conversations live in Firebase.
+    ephemeral_storage: bool = False
+
+    # ------------------------------------------------------- split deployment
+    # Render runs Orion as a public API plus a private vision service. With
+    # VF_VISION_URL set, the API can use that service for the vision roles.
+    # The key is the application-layer credential between the two; it is read
+    # from the environment only and is never returned by any route.
+    vision_url: str = ""
+    internal_key: str = ""
+    vision_timeout_s: float = 30.0
+    vision_status_ttl_s: float = 10.0
+    internal_max_image_bytes: int = 20 * 1024 * 1024
+    internal_max_concurrency: int = 2
 
     # ------------------------------------------------------------- knowledge
     chunk_target_chars: int = 900

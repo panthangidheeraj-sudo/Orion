@@ -182,7 +182,7 @@ class Orchestrator:
     def _model_info() -> Dict[str, Any]:
         h = models.reasoning().health()
         return {"provider": h.provider, "model_id": h.model_id, "accelerator": h.accelerator,
-                "npu": h.npu, "synthetic": h.synthetic}
+                "npu": h.npu and not h.hosted, "synthetic": h.synthetic, "hosted": h.hosted}
 
     def _plain(self, cid, text, kind, gate, decision, mode, job_id, started_ms, persist,
                extra_meta: Optional[Dict[str, Any]] = None, record: bool = True) -> Dict[str, Any]:
@@ -405,7 +405,9 @@ class Orchestrator:
         reasoner = models.reasoning()
         yield {"type": "model", "provider": reasoner.health().provider,
                "model_id": reasoner.model_id, "synthetic": reasoner.health().synthetic,
-               "accelerator": reasoner.health().accelerator, "npu": reasoner.health().npu}
+               "accelerator": reasoner.health().accelerator,
+               "npu": reasoner.health().npu and not reasoner.health().hosted,
+               "hosted": reasoner.health().hosted}
         result = await self.ask(question, **kw)
         for step in result["work_trail"]:
             yield {"type": "step", **step}
