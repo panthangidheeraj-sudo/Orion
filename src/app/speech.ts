@@ -212,6 +212,45 @@ export function speakableText(md: string): string {
     .trim()
 }
 
+/* Chrome fills the voice list asynchronously; keep a copy so the first answer
+   can already use a good voice. */
+let voices: SpeechSynthesisVoice[] = []
+function loadVoices() {
+  try { voices = window.speechSynthesis.getVoices() } catch { voices = [] }
+}
+if (ttsSupported()) {
+  loadVoices()
+  try { window.speechSynthesis.addEventListener('voiceschanged', loadVoices) } catch { /* old browsers */ }
+}
+
+/** Voices that are clear and full-volume in Chrome, best first. The legacy
+ * Windows desktop voices ("Microsoft David/Zira Desktop") and eSpeak-style
+ * voices are noticeably quieter and harsher, so they are only a last resort. */
+const PREFERRED = [
+  /Google US English/i, /Google UK English Female/i, /Google UK English Male/i,
+  /Microsoft .*Online \(Natural\)/i, /Microsoft (Aria|Jenny|Guy|Sonia|Ryan|Neerja|Prabhat)/i,
+  /Samantha/i, /Daniel/i, /Karen/i,
+]
+const QUIET = [/Desktop/i, /espeak/i]
+
+/** A clear English voice for `lang`, or null to let the browser choose. */
+export function pickVoice(lang: string): SpeechSynthesisVoice | null {
+  if (!voices.length) loadVoices()
+  const english = voices.filter((v) => /^en([-_]|$)/i.test(v.lang))
+  if (!english.length) return null
+  const base = lang.toLowerCase().replace('_', '-')
+  const score = (v: SpeechSynthesisVoice) => {
+    let n = 0
+    const i = PREFERRED.findIndex((re) => re.test(v.name))
+    if (i >= 0) n += 100 - i
+    if (QUIET.some((re) => re.test(v.name))) n -= 60
+    if (v.lang.toLowerCase().replace('_', '-') === base) n += 20
+    if (v.default) n += 5
+    return n
+  }
+  return [...english].sort((a, b) => score(b) - score(a))[0] ?? null
+}
+
 export interface Speech {
   cancel: () => void
 }
@@ -248,9 +287,12 @@ export function speakAnswer(text: string, cb: {
   try {
     synth.cancel()
     const lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US'
+    const voice = pickVoice(lang)
     chunks.forEach((c, i) => {
       const u = new SpeechSynthesisUtterance(c)
-      u.lang = lang
+      u.lang = voice?.lang || lang
+      if (voice) u.voice = voice
+      u.volume = 1 // the maximum SpeechSynthesis allows; never rely on the default
       u.rate = 1.02
       u.onstart = () => { if (!started) { started = true; cb.onStart?.() } }
       u.onboundary = () => cb.onWord?.()
