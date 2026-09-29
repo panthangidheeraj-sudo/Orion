@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Icon } from './Icon'
+import { Markdown } from './Markdown'
 
 /**
  * Five real states, not three: `listening`/`ai` are backed by a genuine mic
@@ -8,29 +9,33 @@ import { Icon } from './Icon'
  * for when the real voice pipeline has nothing to say — never a fake speaking
  * animation with no audio behind it.
  */
-export type Speaker = 'idle' | 'listening' | 'processing' | 'ai' | 'unavailable' | 'error'
+export type Speaker = 'idle' | 'listening' | 'processing' | 'ai' | 'unavailable' | 'noinput' | 'error'
 export interface Line { who: 'You' | 'AI'; text: string; live?: boolean }
 
 const SETS: Record<Speaker, { colours: string[]; base: number; dur: number; label: string; icon: string }> = {
   idle: {
     colours: ['rgba(210,214,220,.26)', 'rgba(170,175,183,.20)', 'rgba(225,228,232,.16)'],
-    base: 0.18, dur: 5.6, label: 'Ready', icon: 'mic',
+    base: 0.18, dur: 5.6, label: 'Idle', icon: 'mic',
   },
   listening: {
     colours: ['rgba(255,255,255,.60)', 'rgba(64,150,255,.52)', 'rgba(150,220,255,.40)'],
-    base: 0.34, dur: 3.2, label: 'You are speaking', icon: 'mic',
+    base: 0.34, dur: 3.2, label: 'Listening', icon: 'mic',
   },
   processing: {
     colours: ['rgba(168,140,255,.42)', 'rgba(150,160,255,.34)', 'rgba(120,140,255,.30)'],
-    base: 0.22, dur: 2.2, label: 'Thinking', icon: 'sparks',
+    base: 0.22, dur: 2.2, label: 'Processing', icon: 'sparks',
   },
   ai: {
     colours: ['rgba(168,140,255,.60)', 'rgba(240,123,208,.44)', 'rgba(96,160,255,.50)'],
-    base: 0.3, dur: 4.0, label: 'AI is speaking', icon: 'sparks',
+    base: 0.3, dur: 4.0, label: 'Speaking', icon: 'sparks',
   },
   unavailable: {
     colours: ['rgba(210,214,220,.16)', 'rgba(170,175,183,.12)', 'rgba(225,228,232,.10)'],
     base: 0.1, dur: 6, label: 'Voice output unavailable', icon: 'wifioff',
+  },
+  noinput: {
+    colours: ['rgba(210,214,220,.16)', 'rgba(170,175,183,.12)', 'rgba(225,228,232,.10)'],
+    base: 0.1, dur: 6, label: 'Voice input unavailable in this browser', icon: 'mic',
   },
   error: {
     colours: ['rgba(255,158,150,.32)', 'rgba(255,120,110,.24)', 'rgba(255,180,170,.2)'],
@@ -81,6 +86,15 @@ export function VoicePanel({
     return () => cancelAnimationFrame(raf)
   }, [set.base, reduceMotion, speaker])
 
+  // Keep the newest line in view, from its first word (a long answer is read top-down).
+  const linesRef = useRef<HTMLDivElement | null>(null)
+  const lastText = lines.length ? `${lines.length}:${lines[lines.length - 1].who}:${lines[lines.length - 1].live ? 'l' : 'f'}` : ''
+  useEffect(() => {
+    const box = linesRef.current
+    const last = box?.lastElementChild as HTMLElement | null
+    if (box && last) box.scrollTop = last.offsetTop - box.offsetTop
+  }, [lastText])
+
   const maxBarHeight = compact ? 48 : 84
 
   return (
@@ -115,7 +129,7 @@ export function VoicePanel({
           <span style={{ flex: 1 }} />
           <span className="cap" style={{ color: 'rgba(255,255,255,.55)' }}>Live</span>
         </div>
-        <div className="lines">
+        <div className="lines" ref={linesRef}>
           {lines.length === 0 && (
             <div className="tline">
               <span className="who" style={{ color: 'var(--vf-overlay-2)' }}>AI</span>
@@ -129,10 +143,10 @@ export function VoicePanel({
               <span className="who" style={{ color: l.who === 'You' ? '#fff' : 'var(--vf-overlay-2)' }}>
                 {l.who === 'You' ? 'YOU' : 'AI'}
               </span>
-              <span className="what">
-                {l.text}
+              <div className="what">
+                {l.who === 'AI' ? <Markdown text={l.text} /> : l.text}
                 {l.live && <i style={{ display: 'inline-block', width: 2, height: '1em', marginLeft: 2, verticalAlign: -2, background: 'rgba(255,255,255,.75)', animation: 'vf-blink 1.1s steps(1) infinite' }} />}
-              </span>
+              </div>
             </div>
           ))}
         </div>

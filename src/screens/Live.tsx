@@ -5,7 +5,10 @@ import { Icon } from '../ui/Icon'
 import { Cap, Chip } from '../ui/bits'
 import { useStore } from '../app/store'
 import * as api from '../app/api'
-import { listen, speechSupported } from '../app/speech'
+import {
+  listenOnce, recognitionErrorText, speakAnswer, speechSupported, stopSpeaking, ttsSupported,
+  type OneShot, type Speech,
+} from '../app/speech'
 import { uid } from '../app/util'
 import type { Detection, DocRef, Evidence, Message, OcrTag } from '../app/types'
 
@@ -26,6 +29,29 @@ function capsFor(ready: readonly string[] | undefined, ran?: Partial<Record<keyo
   return { detector: one('detector'), ocr: one('ocr'), tracker: one('tracker'), reasoning: one('reasoning') }
 }
 
+/** The voice loop's four states, and how each looks in the existing panel. */
+type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking'
+const SPEAKER: Record<VoiceState, Speaker> = { idle: 'idle', listening: 'listening', processing: 'processing', speaking: 'ai' }
+const VOICE_WORD: Record<VoiceState, string> = { idle: 'Idle', listening: 'Listening', processing: 'Processing', speaking: 'Speaking' }
+const VOICE_BUTTON: Record<VoiceState, string> = {
+  idle: 'Ask Orion by voice',
+  listening: 'Stop listening and send',
+  processing: 'Cancel',
+  speaking: 'Stop speaking',
+}
+
+/** The words of an answer, as the Live panel shows and speaks them. */
+function answerText(msg: Message): string {
+  return (msg.text || (msg.sections ?? []).map((s) => s.text).join('\n')).trim()
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error('the backend took too long to answer')), ms)
+    p.then((v) => { window.clearTimeout(t); resolve(v) }, (e) => { window.clearTimeout(t); reject(e) })
+  })
+}
+
 function CapChip({ name, state }: { name: string; state: CapState }) {
   const colour = state === 'active' ? '#7cf29a' : state === 'idle' ? 'rgba(255,255,255,.4)' : 'rgba(255,158,150,.85)'
   const text = state === 'active' ? 'running' : state === 'idle' ? 'idle' : 'unavailable'
@@ -40,8 +66,9 @@ function CapChip({ name, state }: { name: string; state: CapState }) {
 export function Live() {
   const { go, active, activeId, newConversation, addMessage, prefs, toast, backend } = useStore()
   const [cam, setCam] = useState<CamState>('idle')
-  const [micOn, setMicOn] = useState(false)
-  const [speaker, setSpeaker] = useState<Speaker>('idle')
+  /** The voice loop: idle → listening → processing → speaking → idle. */
+  const [voice, setVoice] = useState<VoiceState>('idle')
+  const [voiceNote, setVoiceNote] = useState<string | null>(null)
   const [amplitude, setAmplitude] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [lines, setLines] = useState<Line[]>([])
@@ -50,23 +77,45 @@ export function Live() {
   const [detections, setDetections] = useState<Detection[]>([])
   const [ocrTags, setOcrTags] = useState<OcrTag[]>([])
   const [capStatus, setCapStatus] = useState<CapStatus>(CAP_UNAVAILABLE)
+  /** Why the last live frame failed, or null while frames are going through. */
+  const [frameError, setFrameError] = useState<string | null>(null)
   const readyRef = useRef<readonly string[] | undefined>(backend.ready)
   readyRef.current = backend.ready
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const sttSupported = speechSupported()
+  const canSpeak = ttsSupported()
 
   const stageRef = useRef<CameraStageHandle | null>(null)
-  const micAudio = useRef<{ ctx: AudioContext; stream: MediaStream; raf: number } | null>(null)
-  const ttsAudioRef = useRef<HTMLAudioElement | null>(null)
-  const ttsGraph = useRef<{ ctx: AudioContext; analyser: AnalyserNode; raf: number } | null>(null)
-  const rec = useRef<{ stop: () => void } | null>(null)
+  const rec = useRef<OneShot | null>(null)
+  const speech = useRef<Speech | null>(null)
+  /** Mirrors `voice` for callbacks, so a stale closure can't double-submit. */
+  const voiceRef = useRef<VoiceState>('idle')
+  /** Bumped on every Stop: a reply that arrives for a cancelled turn is dropped, never spoken. */
+  const turn = useRef(0)
   const startedAt = useRef(Date.now())
   const pollTimer = useRef<number | null>(null)
   const busy = useRef(false)
+  /** True while a spoken question owns the frame pipeline; background polling waits. */
+  const questionPending = useRef(false)
   const erroredOnce = useRef(false)
+  const decay = useRef<number | null>(null)
   /** Real backend responses that actually ran during this session — the only
    * material `endLive()` is allowed to draw from. */
   const analysisMessages = useRef<Message[]>([])
   const capturedEvidence = useRef<Evidence[]>([])
+
+  const setVoiceState = useCallback((v: VoiceState) => {
+    voiceRef.current = v
+    setVoice(v)
+    if (v === 'idle' || v === 'processing') setAmplitude(0)
+  }, [])
+
+  /** A short pulse on the glow, driven by real events (a recognised word, a spoken word). */
+  const pulse = useCallback((level: number) => {
+    setAmplitude(level)
+    if (decay.current) window.clearTimeout(decay.current)
+    decay.current = window.setTimeout(() => setAmplitude(0.12), 260)
+  }, [])
 
   useEffect(() => {
     if (!activeId) newConversation('Live inspection')
@@ -90,85 +139,15 @@ export function Live() {
     }
   }, [])
 
-  /* --------------------------------------------------- real backend voice */
-
-  const ensureTtsGraph = useCallback(() => {
-    if (ttsGraph.current || !ttsAudioRef.current) return ttsGraph.current
-    try {
-      const Ctor: typeof AudioContext = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      const ctx = new Ctor()
-      const src = ctx.createMediaElementSource(ttsAudioRef.current)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      src.connect(analyser)
-      analyser.connect(ctx.destination)
-      ttsGraph.current = { ctx, analyser, raf: 0 }
-    } catch {
-      // No graph — audio still plays, the glow just won't react to it.
-    }
-    return ttsGraph.current
-  }, [])
-
-  const tickTtsLevel = useCallback(() => {
-    const g = ttsGraph.current
-    if (!g) return
-    const buf = new Uint8Array(g.analyser.frequencyBinCount)
-    const step = () => {
-      g.analyser.getByteTimeDomainData(buf)
-      let sum = 0
-      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v }
-      const rms = Math.sqrt(sum / buf.length)
-      setAmplitude((prev) => prev * 0.7 + Math.min(1, rms * 6) * 0.3)
-      g.raf = requestAnimationFrame(step)
-    }
-    g.raf = requestAnimationFrame(step)
-  }, [])
-
-  /** The only way the AI "speaks": a real synthesis call, a real audio file,
-   * a real playback level driving the glow. A degraded result is shown as
-   * exactly that — never a browser voice standing in for it. */
-  const playTts = useCallback(async (text: string) => {
-    try {
-      const res = await api.synthesizeSpeech(text)
-      if (res.degraded || !res.audioUrl) {
-        setSpeaker('unavailable')
-        setAmplitude(0)
-        window.setTimeout(() => setSpeaker((s) => (s === 'unavailable' ? (micOn ? 'listening' : 'idle') : s)), 2200)
-        return
-      }
-      const el = ttsAudioRef.current
-      if (!el) { setSpeaker(micOn ? 'listening' : 'idle'); return }
-      el.crossOrigin = 'anonymous'
-      el.src = res.audioUrl
-      ensureTtsGraph()
-      await el.play()
-    } catch (err) {
-      setSpeaker('error')
-      setAmplitude(0)
-      toast('Voice playback failed', err instanceof Error ? err.message : 'The local voice service did not respond.')
-      window.setTimeout(() => setSpeaker((s) => (s === 'error' ? (micOn ? 'listening' : 'idle') : s)), 2200)
-    }
-  }, [micOn, toast, ensureTtsGraph])
-
-  const onTtsPlay = useCallback(() => {
-    setSpeaker('ai')
-    if (ttsGraph.current) tickTtsLevel()
-  }, [tickTtsLevel])
-
-  const onTtsEnded = useCallback(() => {
-    if (ttsGraph.current) cancelAnimationFrame(ttsGraph.current.raf)
-    setAmplitude(0)
-    setSpeaker(micOn ? 'listening' : 'idle')
-  }, [micOn])
-
-  const onTtsError = useCallback(() => {
-    if (ttsGraph.current) cancelAnimationFrame(ttsGraph.current.raf)
-    setAmplitude(0)
-    setSpeaker('error')
-    window.setTimeout(() => setSpeaker((s) => (s === 'error' ? (micOn ? 'listening' : 'idle') : s)), 2000)
-  }, [micOn])
-
   /* --------------------------------------------------- real backend frames */
+
+  const openSession = useCallback(async (): Promise<string> => {
+    const session = await api.liveStart(activeId ?? undefined)
+    setSessionId(session.sessionId)
+    setFrameError(null)
+    setCapStatus(capsFor(readyRef.current))
+    return session.sessionId
+  }, [activeId])
 
   useEffect(() => {
     if (cam !== 'live' || !backend.online) {
@@ -181,12 +160,14 @@ export function Live() {
       .then((session) => {
         if (cancelled) { void api.liveStop(session.sessionId); return }
         setSessionId(session.sessionId)
+        setFrameError(null)
         setCapStatus(capsFor(readyRef.current))
       })
       .catch((err: unknown) => {
         if (cancelled) return
         setCapStatus(CAP_UNAVAILABLE)
-        toast('Live analysis unavailable', err instanceof Error ? err.message : 'The local backend did not respond.')
+        setFrameError(err instanceof Error ? err.message : 'the Orion backend did not respond')
+        toast('Live analysis unavailable', err instanceof Error ? err.message : 'The Orion backend did not respond.')
       })
     return () => {
       cancelled = true
@@ -198,57 +179,68 @@ export function Live() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cam, backend.online])
 
-  const sendFrame = useCallback(async (question?: string, deep?: boolean) => {
-    if (!sessionId || busy.current) return
+  /**
+   * Send one frame. Background polls pass no question; a spoken question
+   * passes it and gets the analysis back. A session the server no longer has
+   * (a hosted backend restarted or scaled) is re-opened once, transparently.
+   */
+  const sendFrame = useCallback(async (question?: string): Promise<Message | null | undefined> => {
+    if (!sessionId) return undefined
     const frame = await stageRef.current?.captureFrame()
-    if (!frame) return
-    busy.current = true
+    if (!frame) return undefined
+    let sid = sessionId
+    const once = () => api.liveFrame(sid, frame.blob, question ? { question, deep: true } : {})
+    let result: api.LiveFrameResult
     try {
-      const result = await api.liveFrame(sessionId, frame.blob, { question, deep })
-      erroredOnce.current = false
-      setDetections(api.detectionsFromLive(result.detections))
-      setOcrTags(api.ocrFromLive(result.textRegions, frame.width, frame.height))
-      setCapStatus(capsFor(readyRef.current, result.ran))
-      if (result.analysis) {
-        const msg = api.toMessage(result.analysis, 'live')
-        analysisMessages.current = [...analysisMessages.current, msg].slice(-12)
-        const spoken = msg.text || (msg.sections ?? []).map((s) => s.text).join(' ')
-        setLines((prev) => [...prev.filter((l) => !l.live), { who: 'AI', text: spoken || 'Analysis complete — see the findings below.' } as Line].slice(-6))
-        if (spoken) void playTts(spoken)
-        else setSpeaker(micOn ? 'listening' : 'idle')
-      } else if (question) {
-        setLines((prev) => [...prev.filter((l) => !l.live), { who: 'AI', text: 'I could not analyse that just now — the reasoning model did not respond to this frame.' } as Line].slice(-6))
-        setSpeaker(micOn ? 'listening' : 'idle')
+      try {
+        result = await once()
+      } catch (err) {
+        if (err instanceof api.BackendError && (err.status === 404 || err.status === 410)) {
+          sid = await openSession()
+          result = await once()
+        } else throw err
       }
     } catch (err) {
+      const reason = err instanceof Error ? err.message : 'the Orion backend stopped responding'
+      setFrameError(reason)
+      setCapStatus(CAP_UNAVAILABLE)
       if (!erroredOnce.current) {
         erroredOnce.current = true
-        toast('Live analysis unavailable', err instanceof Error ? err.message : 'The local backend stopped responding to live frames.')
+        toast('Live analysis unavailable', reason)
       }
-      setCapStatus(CAP_UNAVAILABLE)
-      if (question) {
-        setLines((prev) => [...prev.filter((l) => !l.live), { who: 'AI', text: 'Vision model unavailable — I could not analyse that.' } as Line].slice(-6))
-        setSpeaker('error')
-        window.setTimeout(() => setSpeaker((s) => (s === 'error' ? (micOn ? 'listening' : 'idle') : s)), 1800)
-      }
-    } finally {
-      busy.current = false
+      if (question) throw err
+      return undefined
     }
-  }, [sessionId, micOn, toast, playTts])
+    erroredOnce.current = false
+    setFrameError(null)
+    setDetections(api.detectionsFromLive(result.detections))
+    setOcrTags(api.ocrFromLive(result.textRegions, frame.width, frame.height))
+    setCapStatus(capsFor(readyRef.current, result.ran))
+    if (!result.analysis) return null
+    const msg = api.toMessage(result.analysis, 'live')
+    analysisMessages.current = [...analysisMessages.current, msg].slice(-12)
+    // A background analysis (scene change) is shown, never spoken over the user.
+    if (!question) {
+      const shown = answerText(msg)
+      if (shown && voiceRef.current === 'idle') {
+        setLines((prev) => [...prev.filter((l) => !l.live), { who: 'AI', text: shown } as Line].slice(-6))
+      }
+    }
+    return msg
+  }, [sessionId, openSession, toast])
 
   useEffect(() => {
     if (cam !== 'live' || !sessionId) return
-    pollTimer.current = window.setInterval(() => { void sendFrame() }, 1100)
+    pollTimer.current = window.setInterval(() => {
+      if (busy.current || questionPending.current) return
+      busy.current = true
+      void sendFrame().finally(() => { busy.current = false })
+    }, 1100)
     return () => {
       if (pollTimer.current) window.clearInterval(pollTimer.current)
       pollTimer.current = null
     }
   }, [cam, sessionId, sendFrame])
-
-  const askLive = useCallback((heard: string) => {
-    setSpeaker('processing')
-    void sendFrame(heard, true)
-  }, [sendFrame])
 
   /* -------------------------------------------------------------- capture */
 
@@ -265,95 +257,136 @@ export function Live() {
         await api.uploadPhoto(frame.blob, activeId ?? undefined)
         toast('Frame captured', 'Saved to this conversation as evidence.')
       } catch (err) {
-        toast('Frame captured, but could not sync to the backend', err instanceof Error ? err.message : 'The local backend refused the photo.')
+        toast('Frame captured, but could not sync to the backend', err instanceof Error ? err.message : 'The Orion backend refused the photo.')
       }
     } else {
-      toast('Frame captured', 'The local backend is offline, so it was kept locally but not analysed.')
+      toast('Frame captured', 'The Orion backend is offline, so it was kept on this device but not analysed.')
     }
   }, [activeId, backend.online, toast])
 
-  /* --------------------------------------------------------------- mic */
+  /* ------------------------------------------------------------ voice loop */
 
-  const stopMic = useCallback(() => {
-    rec.current?.stop()
-    rec.current = null
-    if (micAudio.current) {
-      cancelAnimationFrame(micAudio.current.raf)
-      micAudio.current.stream.getTracks().forEach((t) => t.stop())
-      void micAudio.current.ctx.close().catch(() => undefined)
-      micAudio.current = null
+  const say = useCallback((text: string, myTurn: number) => {
+    if (!canSpeak) {
+      setVoiceNote('Voice output is unavailable in this browser — the answer is shown as text.')
+      setVoiceState('idle')
+      return
     }
-    setAmplitude(0)
-    setMicOn(false)
-    setSpeaker('idle')
-  }, [])
+    setVoiceState('speaking')
+    speech.current = speakAnswer(text, {
+      onWord: () => pulse(0.55),
+      onEnd: (ok) => {
+        speech.current = null
+        if (turn.current !== myTurn) return
+        if (!ok) setVoiceNote('The browser voice could not play this answer — it is shown as text.')
+        setVoiceState('idle')
+      },
+    })
+    if (!speech.current) {
+      setVoiceNote('The browser voice could not play this answer — it is shown as text.')
+      setVoiceState('idle')
+    }
+  }, [canSpeak, pulse, setVoiceState])
 
-  const startMic = useCallback(async () => {
+  /** Send one spoken question through the existing Live path (with the current
+   * frame) or, with no live camera session, through the normal chat path. */
+  const ask = useCallback(async (question: string) => {
+    if (voiceRef.current === 'processing' || voiceRef.current === 'speaking') return
+    const myTurn = ++turn.current
+    setVoiceState('processing')
+    setLines((prev) => [...prev.filter((l) => !l.live), { who: 'You', text: question } as Line].slice(-6))
+    let msg: Message | null | undefined
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const Ctor: typeof AudioContext = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      const ctx = new Ctor()
-      const src = ctx.createMediaStreamSource(stream)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      src.connect(analyser)
-      const buf = new Uint8Array(analyser.frequencyBinCount)
-      let raf = 0
-      const tick = () => {
-        analyser.getByteTimeDomainData(buf)
-        let sum = 0
-        for (let i = 0; i < buf.length; i++) {
-          const v = (buf[i] - 128) / 128
-          sum += v * v
+      if (cam === 'live' && sessionId) {
+        questionPending.current = true
+        // Wait for a background frame already in flight, so the question is never dropped.
+        const t0 = Date.now()
+        while (busy.current && Date.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 80))
+        busy.current = true
+        try { msg = await withTimeout(sendFrame(question), 90000) } finally {
+          busy.current = false
+          questionPending.current = false
         }
-        const rms = Math.sqrt(sum / buf.length)
-        setAmplitude((prev) => prev * 0.7 + Math.min(1, rms * 6) * 0.3)
-        raf = requestAnimationFrame(tick)
-        if (micAudio.current) micAudio.current.raf = raf
-      }
-      raf = requestAnimationFrame(tick)
-      micAudio.current = { ctx, stream, raf }
-      setMicOn(true)
-      setSpeaker('listening')
-
-      if (speechSupported()) {
-        rec.current = listen(
-          (text, final) => {
-            setSpeaker('listening')
-            setLines((prev) => {
-              const rest = prev.filter((l) => !l.live)
-              const next: Line = final ? { who: 'You', text } : { who: 'You', text, live: true }
-              return [...rest, next].slice(-6)
-            })
-            if (final) askLive(text)
-          },
-          () => undefined,
-        )
+      } else {
+        const res = await withTimeout(api.ask(question, { mode: 'live', web: false }), 90000)
+        msg = res.message
       }
     } catch (err) {
-      const name = (err as DOMException)?.name
-      toast(
-        name === 'NotAllowedError' ? 'Microphone access was declined' : 'No microphone available',
-        'You can still type in Normal Mode, and the camera keeps working.',
-      )
-      setMicOn(false)
+      if (turn.current !== myTurn) return
+      const reason = err instanceof Error ? err.message : 'the Orion backend did not answer'
+      setLines((prev) => [...prev, { who: 'AI', text: `I could not answer that: ${reason}` } as Line].slice(-6))
+      setVoiceState('idle')
+      return
     }
-  }, [toast, askLive])
+    if (turn.current !== myTurn) return
+    const text = msg ? answerText(msg) : ''
+    if (!text) {
+      setLines((prev) => [...prev, { who: 'AI', text: 'The reasoning model did not answer this frame. Try asking again.' } as Line].slice(-6))
+      setVoiceState('idle')
+      return
+    }
+    setLines((prev) => [...prev, { who: 'AI', text } as Line].slice(-6))
+    say(text, myTurn)
+  }, [cam, sessionId, sendFrame, say, setVoiceState])
+
+  const startListening = useCallback(() => {
+    if (voiceRef.current !== 'idle') return
+    setVoiceNote(null)
+    if (!sttSupported) {
+      setVoiceNote('Voice input is unavailable in this browser. Use Chrome, or type in Normal Mode.')
+      return
+    }
+    setVoiceState('listening')
+    rec.current = listenOnce({
+      onInterim: (text) => {
+        pulse(0.6)
+        setLines((prev) => [...prev.filter((l) => !l.live), { who: 'You', text, live: true } as Line].slice(-6))
+      },
+      onFinal: (text) => {
+        rec.current = null
+        setLines((prev) => prev.filter((l) => !l.live))
+        if (!text) {
+          setVoiceNote(recognitionErrorText('no-speech'))
+          setVoiceState('idle')
+          return
+        }
+        voiceRef.current = 'idle'
+        void ask(text)
+      },
+      onError: (code) => {
+        rec.current = null
+        setLines((prev) => prev.filter((l) => !l.live))
+        setVoiceNote(recognitionErrorText(code))
+        setVoiceState('idle')
+      },
+    })
+    if (!rec.current && (voiceRef.current as VoiceState) === 'listening') setVoiceState('idle')
+  }, [sttSupported, ask, pulse, setVoiceState])
+
+  /** The one Stop: ends listening (submitting what was heard), abandons a
+   * pending answer's speech, or interrupts Orion mid-sentence. */
+  const stopVoice = useCallback(() => {
+    const v = voiceRef.current
+    if (v === 'listening') { rec.current?.stop(); return }
+    turn.current += 1
+    speech.current?.cancel()
+    speech.current = null
+    stopSpeaking()
+    setVoiceState('idle')
+  }, [setVoiceState])
 
   useEffect(() => () => {
-    stopMic()
-    if (ttsAudioRef.current) { ttsAudioRef.current.pause(); ttsAudioRef.current.removeAttribute('src') }
-    if (ttsGraph.current) {
-      cancelAnimationFrame(ttsGraph.current.raf)
-      void ttsGraph.current.ctx.close().catch(() => undefined)
-    }
-  }, [stopMic])
+    rec.current?.abort()
+    stopSpeaking()
+    if (decay.current) window.clearTimeout(decay.current)
+  }, [])
 
   /* ---------------------------------------------------------- end & hand off */
 
   const endLive = () => {
-    stopMic()
-    ttsAudioRef.current?.pause()
+    rec.current?.abort()
+    turn.current += 1
+    stopSpeaking()
     if (sessionId) { void api.liveStop(sessionId); setSessionId(null) }
 
     const convoId = activeId ?? newConversation('Live inspection')
@@ -414,7 +447,7 @@ export function Live() {
       notice: verified ? undefined : {
         level: 'need',
         title: 'Nothing was verified during this live session.',
-        text: 'No detections, OCR readings or backend analysis were confirmed while the camera was running. Try again with the local backend online, or describe what you saw.',
+        text: 'No detections, OCR readings or backend analysis were confirmed while the camera was running. Try again with the Orion backend online, or describe what you saw.',
       },
       evidence: evidence.length ? evidence.slice(0, 12) : undefined,
       refs: refs.length ? refs : undefined,
@@ -436,8 +469,6 @@ export function Live() {
 
   return (
     <div className="live">
-      <audio ref={ttsAudioRef} hidden onPlay={onTtsPlay} onEnded={onTtsEnded} onError={onTtsError} />
-
       <CameraStage
         ref={stageRef}
         state={cam}
@@ -454,9 +485,13 @@ export function Live() {
           <div className="scrim-bottom">
             <Icon name="target" size={15} stroke="rgba(255,255,255,.5)" width={1.7} />
             <span style={{ fontSize: 12.5, color: 'rgba(255,255,255,.66)' }}>
-              {capStatus.detector === 'unavailable'
-                ? (backend.online ? 'Live analysis unavailable — the local backend stopped responding.' : 'Vision model unavailable — the local backend is offline.')
-                : selectedDet
+              {!backend.online
+                ? 'The Orion backend is offline — the camera still works, but frames are not analysed.'
+                : frameError
+                  ? `Live analysis paused — ${frameError}`
+                  : capStatus.detector === 'unavailable'
+                    ? 'No detection model on this backend — press the mic and ask, and Orion reads the frame itself.'
+                    : selectedDet
                   ? `${selectedDet.label} is being tracked across frames.`
                   : detections.length
                     ? 'Tap any component to focus the analysis on it.'
@@ -475,7 +510,7 @@ export function Live() {
         </div>
 
         <VoicePanel
-          speaker={speaker}
+          speaker={!sttSupported && voice === 'idle' ? 'noinput' : SPEAKER[voice]}
           amplitude={amplitude}
           lines={lines}
           reduceMotion={prefs.reduceMotion}
@@ -502,13 +537,16 @@ export function Live() {
           <div className="row">
             <button
               type="button"
-              className={micOn ? 'ibtn rec xl' : 'ibtn glass xl'}
-              aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
-              aria-pressed={micOn}
-              onClick={() => (micOn ? stopMic() : void startMic())}
+              className={voice === 'idle' ? 'ibtn glass xl' : 'ibtn rec xl'}
+              aria-label={VOICE_BUTTON[voice]}
+              title={VOICE_BUTTON[voice]}
+              aria-pressed={voice !== 'idle'}
+              disabled={voice === 'idle' && !sttSupported}
+              onClick={() => (voice === 'idle' ? startListening() : stopVoice())}
             >
-              <Icon name="mic" size={24} />
+              <Icon name={voice === 'idle' || voice === 'listening' ? 'mic' : 'stop'} size={24} />
             </button>
+            <span className="cap voice-state" aria-live="polite">{VOICE_WORD[voice]}</span>
             <span style={{ flex: 1 }} />
             <button type="button" className="ibtn glass" aria-label="Capture frame" onClick={() => void captureFrameEvidence()}>
               <Icon name="square" size={19} />
@@ -528,8 +566,10 @@ export function Live() {
         </div>
       </div>
 
-      {!speechSupported() && micOn && (
-        <Chip icon="info" size="sm">Speech recognition is unavailable here — the glow still follows your voice level.</Chip>
+      {(voiceNote || !canSpeak) && (
+        <Chip icon="info" size="sm">
+          {voiceNote ?? 'Voice output is unavailable in this browser — answers are shown as text.'}
+        </Chip>
       )}
 
       {active && active.messages.length > 0 && (

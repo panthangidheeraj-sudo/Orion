@@ -262,13 +262,19 @@ export interface UploadedDocument {
 /** Turn a failed upload into a sentence the user can act on. The backend's own
  * `reason` wins; otherwise the status says what happened. Never a bare "FAILED",
  * and never a JSON parse error when a proxy answers with an HTML page. */
+/** An error from the backend that keeps its HTTP status, so a caller can react
+ * to it (e.g. re-open a live session the server no longer has). */
+export class BackendError extends Error {
+  constructor(message: string, readonly status: number) { super(message) }
+}
+
 async function uploadFailure(res: Response, what: string): Promise<Error> {
   let reason = ''
   try {
     const body = await res.json()
     reason = typeof body?.reason === 'string' ? body.reason : ''
   } catch { /* not JSON (e.g. a gateway error page) */ }
-  if (reason) return new Error(reason)
+  if (reason) return new BackendError(reason, res.status)
   const byStatus: Record<number, string> = {
     401: 'the backend needs an access key — add it in Profile → System status',
     403: 'the backend refused this request',
@@ -279,7 +285,7 @@ async function uploadFailure(res: Response, what: string): Promise<Error> {
     503: 'the backend is starting up — try again in a few seconds',
     504: 'the backend took too long to answer',
   }
-  return new Error(`${what} failed: ${byStatus[res.status] ?? `HTTP ${res.status}`}`)
+  return new BackendError(`${what} failed: ${byStatus[res.status] ?? `HTTP ${res.status}`}`, res.status)
 }
 
 /** fetch() that explains a network-level failure (offline, blocked by CORS, wrong backend URL). */
@@ -361,13 +367,13 @@ export interface LiveSession {
 }
 
 export async function liveStart(conversationId?: string, jobId?: string): Promise<LiveSession> {
-  const res = await apiFetch('/api/live/start', {
+  const res = await uploadFetch('/api/live/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversation_id: conversationId, job_id: jobId }),
   })
+  if (!res.ok) throw await uploadFailure(res, 'starting live analysis')
   const body = await res.json()
-  if (!res.ok) throw new Error(body?.reason || 'could not start a live session')
   return { sessionId: body.session_id, policy: body.policy }
 }
 
@@ -397,9 +403,9 @@ export async function liveFrame(
   if (opts.deep) form.append('deep', 'true')
   if (opts.targetLabel) form.append('target_label', opts.targetLabel)
 
-  const res = await apiFetch('/api/live/frame', { method: 'POST', body: form })
+  const res = await uploadFetch('/api/live/frame', { method: 'POST', body: form })
+  if (!res.ok) throw await uploadFailure(res, 'live frame')
   const body = await res.json()
-  if (!res.ok) throw new Error(body?.reason || `frame rejected (${res.status})`)
   return {
     detections: body.detections ?? [],
     textRegions: body.text_regions ?? [],

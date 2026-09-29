@@ -551,10 +551,12 @@ input, textarea { font: inherit; color: inherit; }
 .voicepanel .lines { display: flex; flex-direction: column; gap: 9px; overflow-y: auto; }
 .tline { display: flex; gap: 10px; align-items: flex-start; }
 .tline .who { width: 26px; flex: none; padding-top: 3px; font-family: var(--vf-mono); font-size: 9px; font-weight: 500; letter-spacing: 0.16em; }
-.tline .what { font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.9); }
+.tline .what { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.9); }
 
 .live-controls { width: 300px; flex: none; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; padding: 16px; background: rgba(255,255,255,0.045); border: 1px solid var(--vf-edge); border-radius: 18px; }
 .live-controls .row { display: flex; align-items: center; gap: 10px; }
+.live-controls .voice-state { color: rgba(255,255,255,0.72); min-width: 72px; }
+.live-controls .ibtn:disabled { opacity: 0.45; cursor: not-allowed; }
 .endlive { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 44px; width: 100%; cursor: pointer; background: rgba(229,72,77,0.14); border: 1px solid rgba(229,72,77,0.4); border-radius: 12px; color: #ff9e96; font-size: 14px; font-weight: 600; }
 .endlive:hover { background: rgba(229,72,77,0.22); }
 
@@ -965,4 +967,16 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
   body { background: #fff; color: #000; }
   .vf-stage, .vf-vig, .vf-nav, .tabbar, .no-print { display: none !important; }
   .paper, .panel, .card { background: #fff !important; color: #000 !important; border-color: #ccc !important; box-shadow: none !important; }
+}
+
+/* An answer inside the Live voice panel: same Markdown, sized for the panel. */
+.voicepanel .what .md { font-size: inherit; line-height: 1.5; color: inherit; }
+.voicepanel .what .md > * + * { margin-top: 6px; }
+.voicepanel .what .md > p:first-child, .voicepanel .what .md strong, .voicepanel .what .md .md-h { color: #fff; }
+.voicepanel .what .md .md-h { margin-top: 10px; font-size: inherit; }
+.voicepanel .what .md li::marker { color: rgba(255,255,255,.5); }
+.voicepanel .lines { min-height: 0; flex: 1 1 auto; }
+@media (max-width: 767px) {
+  /* A long spoken answer scrolls inside the panel, so the mic/Stop stay on screen. */
+  .voicepanel .lines { max-height: 38vh; }
 }
