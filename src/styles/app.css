@@ -371,6 +371,18 @@ input, textarea { font: inherit; color: inherit; }
   mask-image: linear-gradient(to bottom, transparent 0, #000 56px, #000 100%);
 }
 .thread-scroll > * { width: 100%; max-width: 880px; }
+/* The Files dock (272px, absolute, top-right of .thread) sits over this
+   column whenever the thread is too narrow for an 880px column plus the dock
+   on either side. Keep the column's left edge where centring puts it, but
+   stop its right edge 20px (the chat frame's own gutter) before the dock.
+   Wide enough screens resolve to exactly the old 880px centred column; on
+   phones the dock is static and the rule below returns the full width. */
+.thread-scroll > :not(.empty) {
+  --dock-clear: calc(272px + 20px);
+  align-self: flex-start;
+  margin-left: max(0px, calc((100% - 880px) / 2));
+  width: min(880px, calc(100% - var(--dock-clear) - max(0px, calc((100% - 880px) / 2))));
+}
 
 .msg-user { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .msg-user .bubble {
@@ -759,6 +771,7 @@ input, textarea { font: inherit; color: inherit; }
     -webkit-mask-image: none; mask-image: none;
   }
   .thread-scroll > * { max-width: 100%; }
+  .thread-scroll > :not(.empty) { align-self: stretch; margin-left: 0; width: 100%; }
   .thread > .composer { flex: none; }
   .answer { padding: 11px 12px; border-radius: 15px; }
   .section { gap: 9px; }
