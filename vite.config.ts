@@ -14,16 +14,30 @@ import react from '@vitejs/plugin-react'
  * Build-only: the dev server relies on inline scripts (React refresh) and a
  * websocket, which a strict policy would block.
  */
-function contentSecurityPolicy(backendOrigin: string): Plugin {
+function contentSecurityPolicy(backendOrigin: string, firebaseAuthDomain?: string): Plugin {
+  // Optional Google sign-in + Firestore sync (src/lib/firebase*.ts). Only
+  // allowed when a Firebase config is present at build time. The auth popup
+  // talks to the project's authDomain through a hidden iframe and loads
+  // Google's gapi loader; tokens and Firestore go to *.googleapis.com; the
+  // signed-in avatar comes from googleusercontent.
+  const fb = firebaseAuthDomain
+    ? {
+        script: ' https://apis.google.com',
+        connect: ' https://*.googleapis.com https://apis.google.com',
+        frame: `https://${firebaseAuthDomain} https://accounts.google.com`,
+        img: ' https://*.googleusercontent.com',
+      }
+    : { script: '', connect: '', frame: "'none'", img: '' }
   const policy = [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src 'self'${fb.script}`,
     // Components set inline style attributes; TextPressure injects a <style>.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
-    `img-src 'self' data: blob: ${backendOrigin}`,
+    `img-src 'self' data: blob: ${backendOrigin}${fb.img}`,
     `media-src 'self' blob: ${backendOrigin}`,
-    `connect-src 'self' ${backendOrigin}`,
+    `connect-src 'self' ${backendOrigin}${fb.connect}`,
+    `frame-src ${fb.frame}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -49,7 +63,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const backend = originOf(env.VITE_VF_BACKEND?.replace(/\/$/, '') || 'http://127.0.0.1:8756')
   return {
-    plugins: [react(), contentSecurityPolicy(backend)],
+    plugins: [react(), contentSecurityPolicy(backend, env.VITE_FIREBASE_AUTH_DOMAIN?.trim() || undefined)],
     // Dev server on this machine only. It used to listen on every network
     // interface (host: true), exposing the dev server — and the Vite dev-server
     // file-access bugs — to anyone on the same Wi-Fi. To test on a phone,

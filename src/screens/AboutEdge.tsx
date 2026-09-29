@@ -160,8 +160,8 @@ export function EdgeScene() {
         <div className="ab-chip" aria-hidden="true"><div className="ab-chip-tilt"><ChipArt /></div></div>
 
         <div className="ab-edge-copy">
+          <Logo className="ab-edge-badge" />
           <p className="ab-kicker ab-edge-kicker">
-            <Logo className="ab-edge-logo" />
             <span>Edge architecture</span>
           </p>
           <h2 id="ab-edge-t" className="ab-display ab-edge-title">

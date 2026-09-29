@@ -143,12 +143,20 @@
     scale(calc(1 + var(--s) * 0.7));
 }
 
-.ab-warp { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+/* The warp rings rush outward into the next scene. Every ring has finished
+   (grown past the edges and faded to nothing) before the hero's pin ends:
+   a ring still visible when the stage scrolls away gets cut off along the
+   stage's bottom edge — a hard horizontal seam right above "Built for
+   Snapdragon". The layer-wide fade is a safety net for the last few frames. */
+.ab-warp {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  opacity: calc(1 - clamp(0, calc((var(--p) - 0.9) / 0.08), 1));
+}
 .ab-warp i {
   position: absolute; left: 50%; top: 50%; width: 40cqmin; height: 40cqmin; margin: -20cqmin 0 0 -20cqmin;
   border-radius: 50%; border: 1px solid rgba(var(--ab-glow), 0.55);
   box-shadow: 0 0 30px rgba(var(--ab-glow), 0.18), inset 0 0 30px rgba(var(--ab-glow), 0.12);
-  --w: clamp(0, calc((var(--p) - 0.5 - var(--k) * 0.09) / 0.32), 1);
+  --w: clamp(0, calc((var(--p) - 0.46 - var(--k) * 0.075) / 0.28), 1);
   transform: scale(calc(0.12 + var(--w) * 4.2));
   opacity: calc(min(var(--w) * 5, 1 - var(--w)) * 0.8);
   will-change: transform, opacity;
@@ -410,7 +418,13 @@
   will-change: transform, opacity;
 }
 .ab-edge-kicker { display: flex; align-items: center; gap: 14px; color: rgba(var(--vf-fg-rgb), 0.7); }
-.ab-edge-logo { display: block; height: 22px; width: auto; }
+/* The Snapdragon badge heads the copy column. It carries its own red glow,
+   so it only gets a soft lift, no extra frame. */
+.ab-edge-badge {
+  display: block; width: clamp(68px, 7.2cqw, 104px); height: auto; margin: 0 0 -4px -6px;
+  filter: drop-shadow(0 12px 26px rgba(160, 10, 10, 0.28));
+  user-select: none;
+}
 .ab-edge-title { font-size: clamp(40px, min(7.4cqw, 11cqh), 128px); }
 .ab-edge-lead { max-width: 42ch; color: rgba(var(--vf-fg-rgb), 0.66); }
 .ab-specs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 6px 0 0; }
@@ -481,7 +495,7 @@
   text-transform: uppercase; line-height: 1; letter-spacing: -0.005em;
   font-size: clamp(17px, min(2.1cqw, 3.4cqh), 30px); color: var(--vf-text);
 }
-.ab-layer-logo { height: 0.95em; width: auto; flex: none; }
+.ab-layer-logo { height: 1.3em; width: auto; flex: none; margin: -0.2em 0; }
 .ab-layer-sub { font-size: 12px; line-height: 1.4; color: rgba(var(--vf-fg-rgb), 0.55); }
 .ab-layer-tag {
   font-family: var(--vf-mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; white-space: nowrap;
@@ -922,14 +936,18 @@
   .ab-obj .ab-obj-num { font-size: clamp(120px, 44cqw, 220px); top: 40%; }
 
   /* Built for Snapdragon: copy on top, the stack below, cards stacked. */
-  .ab-edge-copy { left: 6cqw; right: 6cqw; top: 5cqh; width: auto; gap: 10px; }
+  /* Copy and stack share one column: laid out in flow (not two absolutely
+     placed blocks), so on a short phone the stack starts below the copy
+     instead of sliding up underneath the title. */
+  .ab-edge .ab-stage { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; padding: 5cqh 6cqw 3cqh; }
+  .ab-edge-copy { position: relative; left: auto; right: auto; top: auto; width: auto; gap: 10px; }
   .ab-edge-title { font-size: clamp(30px, 9.6cqw, 56px); }
   .ab-edge-lead { font-size: 12px; line-height: 1.55; }
   .ab-edge-kicker { font-size: 10px; }
-  .ab-edge-logo { height: 18px; }
+  .ab-edge-badge { width: 52px; margin: 0 0 -2px -4px; }
   .ab-specs { display: none; }
   .ab-chip { right: auto; left: 50%; top: 64%; width: 96cqw; translate: -50% -50%; opacity: calc(var(--in) * 0.6); }
-  .ab-stack-wrap { left: 6cqw; right: 6cqw; width: auto; top: auto; bottom: 3cqh; translate: none; }
+  .ab-stack-wrap { position: relative; left: auto; right: auto; width: auto; top: auto; bottom: auto; translate: none; }
   .ab-stack { gap: 6px; }
   .ab-stack-rail { left: 13px; top: 14px; bottom: 14px; }
   .ab-layer { grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 10px 9px 0; }
@@ -938,7 +956,7 @@
   .ab-layer-pin::after { width: 6px; height: 6px; }
   .ab-layer-body { padding-left: 12px; }
   .ab-layer-name { display: block; font-size: clamp(13px, 3.7cqw, 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ab-layer-logo { display: none; } /* the kicker carries the logo on phones */
+  .ab-layer-logo { display: none; } /* the badge above the title carries it on phones */
   .ab-out-words { white-space: normal; font-size: clamp(12px, 3.4cqw, 15px); }
   /* Only the active layer shows its detail line, so the stack stays short. */
   .ab-layer-sub { font-size: 10.5px; overflow: hidden; max-height: calc(var(--cur) * 30px); opacity: var(--cur); }
@@ -967,6 +985,15 @@
   .ab-why-cue { width: 42px; height: 42px; }
 
   .ab-end-title { font-size: clamp(34px, 11cqw, 64px); }
+}
+
+/* Short phones: keep Built for Snapdragon to one screen — drop the badge and
+   the lead line (the kicker and title still say it) and tighten the stack. */
+@media (max-width: 767px) and (max-height: 760px) {
+  .ab-edge-badge, .ab-edge-lead { display: none; }
+  .ab-edge-title { font-size: clamp(26px, 8.4cqw, 44px); }
+  .ab-stack { gap: 4px; }
+  .ab-layer { padding-top: 7px; padding-bottom: 7px; }
 }
 
 /* Tablets: the machine and senses get a bit more room. */

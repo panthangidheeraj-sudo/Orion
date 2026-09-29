@@ -3,6 +3,7 @@ import type { Access, Conversation, Message, Mode, Prefs, Profile, Route, Step, 
 import * as api from './api'
 import { DEFAULT_ACCESS, DEFAULT_PREFS, DEFAULT_PROFILE, SEED_CONVERSATIONS, SEED_FILES } from './seed'
 import { applyTheme, load, loadList, save, uid } from './util'
+import { useCloudSync, type Cloud } from './cloudSync'
 
 const K = {
   convos: 'vf.conversations',
@@ -88,6 +89,9 @@ interface Store {
   toasts: Toast[]
   toast: (title: string, detail?: string) => void
   dismiss: (id: string) => void
+
+  /** Optional Google account + Firestore sync. Local data never depends on it. */
+  cloud: Cloud
 }
 
 const Ctx = createContext<Store | null>(null)
@@ -468,6 +472,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => () => askTimers.current.forEach((t) => window.clearTimeout(t)), [])
 
+  const cloud = useCloudSync({
+    profile, setProfile: setProfileState,
+    access, setAccess: setAccessState,
+    prefs, setPrefs: setPrefsState,
+    conversations, setConversations,
+    toast,
+  })
+
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
     [conversations, activeId],
@@ -484,6 +496,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     access, setAccess: setAccessState,
     prefs, setPrefs: setPrefsState,
     toasts, toast, dismiss,
+    cloud,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
