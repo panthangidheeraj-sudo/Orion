@@ -37,8 +37,8 @@ export function Home() {
     <div className="home">
       <div className="home-body">
         <div className="hero-pressure" role="heading" aria-level={1} aria-label="Every fault, seen clearly.">
-          <TextPressure as="div" text="Every fault," textColor="rgba(242,243,244,0.72)" minFontSize={26} maxFontSize={78} italic={false} />
-          <TextPressure as="div" text="seen clearly." textColor="#f2f3f4" minFontSize={26} maxFontSize={78} italic={false} />
+          <TextPressure as="div" text="Every fault," textColor="rgba(var(--vf-fg-rgb), 0.72)" minFontSize={26} maxFontSize={78} italic={false} />
+          <TextPressure as="div" text="seen clearly." textColor="var(--vf-text)" minFontSize={26} maxFontSize={78} italic={false} />
         </div>
         <Composer
           compact
@@ -57,7 +57,7 @@ export function Home() {
         <div className="suggestions vf-stagger">
           {SUGGESTIONS.map((s) => (
             <button key={s.text} type="button" className="suggestion" onClick={() => start(s.prompt)}>
-              <Icon name={s.icon} size={14} stroke="rgba(255,255,255,.55)" />
+              <Icon name={s.icon} size={14} stroke="rgba(var(--vf-fg-rgb), .55)" />
               {s.text}
             </button>
           ))}

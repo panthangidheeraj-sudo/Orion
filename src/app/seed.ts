@@ -17,6 +17,7 @@ export const DEFAULT_ACCESS: Access = {
 
 export const DEFAULT_PREFS: Prefs = {
   reduceMotion: false,
+  theme: 'dark',
   webSearch: true,
   onboarded: false,
 }

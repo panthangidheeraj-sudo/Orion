@@ -60,3 +60,12 @@ export function save(key: string, value: unknown) {
     /* private mode, blocked storage — the app works without persistence */
   }
 }
+
+/** Apply the Appearance setting to the document (see styles/tokens.css). */
+export function applyTheme(theme: 'dark' | 'light') {
+  const root = document.documentElement
+  if (theme === 'light') root.dataset.theme = 'light'
+  else delete root.dataset.theme
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#f3f4f6' : '#000000')
+}

@@ -95,8 +95,12 @@ export interface Access {
   history: boolean
 }
 
+export type Theme = 'dark' | 'light'
+
 export interface Prefs {
   reduceMotion: boolean
+  /** Appearance. Absent in prefs saved before light mode existed → dark. */
+  theme?: Theme
   webSearch: boolean
   onboarded: boolean
 }

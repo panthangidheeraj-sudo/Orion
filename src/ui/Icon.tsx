@@ -94,6 +94,7 @@ export function MoonMark({ size = 32 }: { size?: number }) {
   return (
     <img
       src={moonBrandmarkUrl}
+      className="vf-moon"
       alt=""
       aria-hidden="true"
       width={size}

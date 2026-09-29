@@ -203,3 +203,17 @@
   padding: 0 4px;
   font-size: 10.5px;
 }
+
+/* ---------------------------------------------------------- light theme
+   The same trick, mirrored: a white crush box, a black pill and particles,
+   and `darken` to hide the box — so the gooey blob reads as the dark
+   active pill on a white nav. */
+:root[data-theme='light'] .gooey-nav-container {
+  --color-1: #15171b;
+  --color-2: #394049;
+  --color-3: #5f6570;
+  --color-4: #111317;
+}
+:root[data-theme='light'] .gooey-nav-container .effect.filter { mix-blend-mode: darken; }
+:root[data-theme='light'] .gooey-nav-container .effect.filter::before { background: white; }
+:root[data-theme='light'] .gooey-nav-container .effect.filter::after { background: black; }

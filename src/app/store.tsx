@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Access, Conversation, Message, Mode, Prefs, Profile, Route, Step, VFile } from './types'
 import * as api from './api'
 import { DEFAULT_ACCESS, DEFAULT_PREFS, DEFAULT_PROFILE, SEED_CONVERSATIONS, SEED_FILES } from './seed'
-import { load, loadList, save, uid } from './util'
+import { applyTheme, load, loadList, save, uid } from './util'
 
 const K = {
   convos: 'vf.conversations',
@@ -160,6 +160,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.toggle('reduce-motion', prefs.reduceMotion)
   }, [prefs.reduceMotion])
+
+  // Appearance: every colour in the app is a token (styles/tokens.css), and
+  // the light set is keyed off html[data-theme='light']. main.tsx applies the
+  // saved theme before the first paint; this keeps it in sync afterwards.
+  useEffect(() => applyTheme(prefs.theme ?? 'dark'), [prefs.theme])
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), [])
 

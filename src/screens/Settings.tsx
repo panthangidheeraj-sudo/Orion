@@ -93,20 +93,24 @@ export function Settings() {
         <h2>Appearance</h2>
         <p className="lead">Theme and motion.</p>
         <div style={{ display: 'flex', gap: 12, marginBottom: 6 }}>
-          <button type="button" className="theme-opt" aria-pressed={false} onClick={() => toast('Light mode is not in this build', 'The deep-space identity is dark only for now.')}>
-            <span className="swatch" style={{ background: 'linear-gradient(160deg,#ffffff,#e6e8ec)' }} />
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="sun" size={16} stroke="var(--vf-text-2)" width={1.8} />
-              <b style={{ fontSize: 13.5 }}>Light</b>
-            </span>
-          </button>
-          <button type="button" className="theme-opt" aria-pressed>
-            <span className="swatch" style={{ background: 'linear-gradient(160deg,#1a1c20,#000000)' }} />
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="moon" size={16} stroke="var(--vf-text)" width={1.8} />
-              <b style={{ fontSize: 13.5 }}>Dark · current</b>
-            </span>
-          </button>
+          {([
+            { id: 'light', label: 'Light', icon: 'sun', swatch: 'linear-gradient(160deg,#ffffff,#e6e8ec)' },
+            { id: 'dark', label: 'Dark', icon: 'moon', swatch: 'linear-gradient(160deg,#1a1c20,#000000)' },
+          ] as const).map((t) => {
+            const on = (prefs.theme ?? 'dark') === t.id
+            return (
+              <button
+                key={t.id} type="button" className="theme-opt" aria-pressed={on}
+                onClick={() => { if (!on) setPrefs({ ...prefs, theme: t.id }) }}
+              >
+                <span className="swatch" style={{ background: t.swatch }} />
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon name={t.icon} size={16} stroke={on ? 'var(--vf-text)' : 'var(--vf-text-2)'} width={1.8} />
+                  <b style={{ fontSize: 13.5 }}>{t.label}{on && ' · current'}</b>
+                </span>
+              </button>
+            )
+          })}
         </div>
         <SettingRow
           title="Reduce motion"

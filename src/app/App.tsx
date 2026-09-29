@@ -20,7 +20,7 @@ function Toasts() {
     <div className="toast-wrap" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div className="toast" key={t.id}>
-          <Icon name="check" size={19} stroke="#0b7a52" width={2.1} />
+          <Icon name="check" size={19} stroke="var(--vf-ok-on-invert)" width={2.1} />
           <div style={{ flex: 1 }}>
             <b>{t.title}</b>
             {t.detail && <div><span>{t.detail}</span></div>}
@@ -45,8 +45,8 @@ export function App() {
   const showTabbar = route !== 'onboarding' && route !== 'live'
 
   return (
-    <div className="vf-app">
-      {starfield ? <Starfield reduceMotion={prefs.reduceMotion} /> : <div className="vf-stage"><div className="vf-vig" /></div>}
+    <div className={route === 'live' ? 'vf-app is-live' : 'vf-app'}>
+      {starfield ? <Starfield reduceMotion={prefs.reduceMotion} theme={prefs.theme ?? 'dark'} /> : <div className="vf-stage"><div className="vf-vig" /></div>}
 
       {/* `has-tabbar` is what reserves room for the fixed phone tab bar: the
           frame's bottom padding becomes --vf-nav-reserve (tab bar height +

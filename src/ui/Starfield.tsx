@@ -20,7 +20,7 @@ export function resetStarTuning() {
  * they close in, fading out at the centre, then respawning at the rim.
  * No trails, no radial lines, no tunnel.
  */
-export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
+export function Starfield({ reduceMotion, theme = 'dark' }: { reduceMotion: boolean; theme?: 'dark' | 'light' }) {
   const ref = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -37,7 +37,13 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
     // fillStyle once per tint and varies only globalAlpha (a plain number) per
     // star — instead of building and parsing ~1000 rgba() strings per frame,
     // which competed with the About page's scroll frames for the main thread.
-    const tints = ['rgb(255,255,255)', 'rgb(240,243,247)', 'rgb(222,228,236)', 'rgb(255,252,246)']
+    // Light theme: the same field, drawn as graphite points on paper, a
+    // little fainter so it stays texture rather than noise behind the text.
+    const light = theme === 'light'
+    const tints = light
+      ? ['rgb(38,42,50)', 'rgb(58,64,76)', 'rgb(84,92,108)', 'rgb(46,50,60)']
+      : ['rgb(255,255,255)', 'rgb(240,243,247)', 'rgb(222,228,236)', 'rgb(255,252,246)']
+    const alphaScale = light ? 0.55 : 1
     const T = tints.length
     let stars: Star[] = []
     let w = 0
@@ -113,7 +119,7 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
           // inner third thins exactly the area the headline and composer sit in.
           const inner = Math.max(0, Math.min(1, (q - 0.05) / 0.3))
           const outer = Math.max(0, Math.min(1, (1.2 - q) / 0.14))
-          const alpha = Math.min(1, s.o * (0.55 + p * 0.8) * inner * outer)
+          const alpha = Math.min(1, s.o * (0.55 + p * 0.8) * inner * outer) * alphaScale
           if (alpha <= 0.004) continue
           ctx.globalAlpha = alpha
           if (rad <= 0.9) {
@@ -154,7 +160,7 @@ export function Starfield({ reduceMotion }: { reduceMotion: boolean }) {
       window.removeEventListener('resize', onResize)
       if (raf) window.cancelAnimationFrame(raf)
     }
-  }, [reduceMotion])
+  }, [reduceMotion, theme])
 
   return (
     <div className="vf-stage" aria-hidden="true">

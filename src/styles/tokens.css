@@ -32,6 +32,19 @@
   /* action */
   --vf-invert: #f2f3f4;
   --vf-on-invert: #0a0b0d;
+  --vf-invert-hover: #ffffff;
+  --vf-on-invert-2: #4a4e56;   /* secondary text on an inverted surface (toasts) */
+  --vf-ok-on-invert: #0b7a52;
+  --vf-hover: #31353c;         /* hover fill for track-coloured controls */
+  --vf-disabled: #70757d;
+
+  /* Channel triplets for translucent tints: rgba(var(--vf-fg-rgb), a) is
+     "a little of the text colour" — a light veil on dark, a dark veil on
+     light — so hairlines, washes and glows follow the theme. */
+  --vf-fg-rgb: 242, 243, 244;
+  --vf-bg-rgb: 0, 0, 0;
+  --vf-shadow-rgb: 0, 0, 0;
+  color-scheme: dark;
 
   /* status — the only colour in the product besides the voice spectrum */
   --vf-ok: #43d9a3;
@@ -58,6 +71,7 @@
   --vf-e1: 0 1px 2px rgba(0, 0, 0, 0.45);
   --vf-e2: 0 10px 28px -12px rgba(0, 0, 0, 0.65);
   --vf-e3: 0 26px 70px -22px rgba(0, 0, 0, 0.92);
+  --vf-scrim: rgba(0, 0, 0, 0.66);
 
   /* motion */
   --vf-instant: 90ms;
@@ -82,6 +96,69 @@
   --vf-tabbar-h: 0px;          /* outer height of the bar */
   --vf-tabbar-gap: 0px;        /* distance from the bottom edge (above the safe area) */
   --vf-nav-reserve: calc(24px + var(--vf-safe-bottom));
+}
+
+/* ------------------------------------------------------------ light theme
+   Set by the Appearance setting (html[data-theme='light'], see store.tsx).
+   Same structure, same "no accent hue" rule: the canvas is a cool paper
+   white, panels are white, and action is a near-black fill. Status colours
+   are deepened so they keep AA contrast on white. Every text/surface pair
+   below clears 4.5:1 (muted on canvas ≈ 5.3:1). */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --vf-black: #f3f4f6;          /* the canvas (named for the dark theme) */
+  --vf-panel: #ffffff;
+  --vf-panel-glass: rgba(255, 255, 255, 0.74);
+  --vf-glass-blur: blur(8px) saturate(1.2);
+  --vf-inset: #eceef1;
+  --vf-track: #e7e9ed;
+  --vf-border: #d6d9df;
+  --vf-edge: #c2c6ce;
+  --vf-border-strong: #c7cbd2;
+
+  --vf-text: #111317;
+  --vf-text-2: #394049;
+  --vf-muted: #5f6570;
+  --vf-placeholder: #7b818b;
+
+  --vf-invert: #15171b;
+  --vf-on-invert: #f6f7f9;
+  --vf-invert-hover: #000000;
+  --vf-on-invert-2: #b9bec6;
+  --vf-ok-on-invert: #43d9a3;
+  --vf-hover: #dcdfe4;
+  --vf-disabled: #9aa0a9;
+
+  --vf-ok: #0e8a5f;
+  --vf-warn: #9a6200;
+  --vf-danger: #c8372b;
+  --vf-record: #d93036;
+
+  --vf-fg-rgb: 17, 19, 23;
+  --vf-bg-rgb: 243, 244, 246;
+  --vf-shadow-rgb: 22, 26, 34;
+
+  --vf-e1: 0 1px 2px rgba(22, 26, 34, 0.08);
+  --vf-e2: 0 10px 28px -12px rgba(22, 26, 34, 0.2);
+  --vf-e3: 0 26px 70px -22px rgba(22, 26, 34, 0.32);
+  --vf-scrim: rgba(22, 26, 34, 0.36);
+}
+
+/* Live Mode is a camera viewfinder: it stays dark in either theme, so the
+   overlays drawn on top of video keep their contrast. */
+:root[data-theme='light'] .vf-app.is-live {
+  color-scheme: dark;
+  --vf-black: #000000; --vf-panel: #1a1c20; --vf-panel-glass: rgba(26, 28, 32, 0.42);
+  --vf-glass-blur: blur(5px) saturate(1.1);
+  --vf-inset: #121417; --vf-track: #26292f; --vf-border: #383d45; --vf-edge: #565b65; --vf-border-strong: #4a4f59;
+  --vf-text: #f2f3f4; --vf-text-2: #c4c8ce; --vf-muted: #8e939b; --vf-placeholder: #7e838b;
+  --vf-invert: #f2f3f4; --vf-on-invert: #0a0b0d; --vf-invert-hover: #ffffff; --vf-on-invert-2: #4a4e56;
+  --vf-ok-on-invert: #0b7a52; --vf-hover: #31353c; --vf-disabled: #70757d;
+  --vf-ok: #43d9a3; --vf-warn: #f5b942; --vf-danger: #ff7a6b; --vf-record: #e5484d;
+  --vf-fg-rgb: 242, 243, 244; --vf-bg-rgb: 0, 0, 0; --vf-shadow-rgb: 0, 0, 0;
+  --vf-e1: 0 1px 2px rgba(0, 0, 0, 0.45); --vf-e2: 0 10px 28px -12px rgba(0, 0, 0, 0.65); --vf-e3: 0 26px 70px -22px rgba(0, 0, 0, 0.92);
+  --vf-scrim: rgba(0, 0, 0, 0.66);
+  background: #000000; color: var(--vf-text);
 }
 
 @media (max-width: 1023px) {

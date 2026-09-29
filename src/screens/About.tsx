@@ -11,9 +11,10 @@ import { EdgeMore, EdgeScene, SNAPDRAGON_LOGO } from './AboutEdge'
 import '../styles/about.css'
 
 /*
- * About — Orion's product story, told as scroll scenes. Section 6b (AboutEdge.tsx), between
- * "Built for the field" and "Local by design", is the Qualcomm Snapdragon edge architecture:
- * Qwen3-VL-4B-Instruct via GenieX + QAIRT.
+ * About — Orion's product story, told as scroll scenes. Section 1b (AboutEdge.tsx), right after
+ * the hero ("See. Understand. Act.") and before "The machine is speaking", is the Qualcomm
+ * Snapdragon edge architecture — Qwen3-VL-4B-Instruct via GenieX + QAIRT — and the models
+ * behind each of Orion's capabilities.
  *
  * Every claim on this page maps to something the app actually does today:
  * photo and live-camera inspection, detector/OCR senses (reported honestly
@@ -340,6 +341,10 @@ export function About() {
           </div>
         </section>
 
+        {/* 1b — BUILT FOR SNAPDRAGON: the edge architecture and the models Orion uses */}
+        <EdgeScene />
+        <EdgeMore />
+
         {/* 2 — THE MACHINE IS SPEAKING */}
         <section className="ab-scene ab-machine" data-scene="pin" style={{ '--len': 3.8 } as Vars} aria-labelledby="ab-machine-t">
           <div className="ab-stage">
@@ -473,10 +478,6 @@ export function About() {
             </p>
           </div>
         </section>
-
-        {/* 6b — BUILT FOR SNAPDRAGON: the edge architecture */}
-        <EdgeScene />
-        <EdgeMore />
 
         {/* 7 — LOCAL BY DESIGN */}
         <section className="ab-scene ab-local" data-scene="flow" aria-labelledby="ab-local-t">
