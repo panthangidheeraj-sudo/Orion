@@ -1,155 +1,81 @@
-import { useEffect, useRef } from 'react'
-import { Icon } from './Icon'
+import { useEffect, useRef, type RefObject } from 'react'
 import { Markdown } from './Markdown'
+import { VoiceAura, type AuraMode, type AuraSignal } from './VoiceAura'
 
 /**
- * Five real states, not three: `listening`/`ai` are backed by a genuine mic
- * or playback level (see Live.tsx), `processing` covers the gap while a real
- * backend request is in flight, and `unavailable`/`error` are honest states
- * for when the real voice pipeline has nothing to say — never a fake speaking
- * animation with no audio behind it.
+ * Orion in the Live scene: the aura (a field of light in the camera image)
+ * with the conversation floating just beneath it. There is no card — no
+ * background, border or edge — only a soft, edgeless veil behind the words
+ * for legibility, so the camera continues behind everything.
+ *
+ * States stay honest: `listening` is driven by the real microphone (or the
+ * recognizer's own events), `ai` by the speech synthesizer's callbacks,
+ * `processing` covers a real backend request in flight. `unavailable`,
+ * `noinput` and `error` keep the aura alive but quieter.
  */
 export type Speaker = 'idle' | 'listening' | 'processing' | 'ai' | 'unavailable' | 'noinput' | 'error'
 export interface Line { who: 'You' | 'AI'; text: string; live?: boolean }
 
-const SETS: Record<Speaker, { colours: string[]; base: number; dur: number; label: string; icon: string }> = {
-  idle: {
-    colours: ['rgba(210,214,220,.26)', 'rgba(170,175,183,.20)', 'rgba(225,228,232,.16)'],
-    base: 0.18, dur: 5.6, label: 'Idle', icon: 'mic',
-  },
-  listening: {
-    colours: ['rgba(255,255,255,.60)', 'rgba(64,150,255,.52)', 'rgba(150,220,255,.40)'],
-    base: 0.34, dur: 3.2, label: 'Listening', icon: 'mic',
-  },
-  processing: {
-    colours: ['rgba(168,140,255,.42)', 'rgba(150,160,255,.34)', 'rgba(120,140,255,.30)'],
-    base: 0.22, dur: 2.2, label: 'Processing', icon: 'sparks',
-  },
-  ai: {
-    colours: ['rgba(168,140,255,.60)', 'rgba(240,123,208,.44)', 'rgba(96,160,255,.50)'],
-    base: 0.3, dur: 4.0, label: 'Speaking', icon: 'sparks',
-  },
-  unavailable: {
-    colours: ['rgba(210,214,220,.16)', 'rgba(170,175,183,.12)', 'rgba(225,228,232,.10)'],
-    base: 0.1, dur: 6, label: 'Voice output unavailable', icon: 'wifioff',
-  },
-  noinput: {
-    colours: ['rgba(210,214,220,.16)', 'rgba(170,175,183,.12)', 'rgba(225,228,232,.10)'],
-    base: 0.1, dur: 6, label: 'Voice input unavailable in this browser', icon: 'mic',
-  },
-  error: {
-    colours: ['rgba(255,158,150,.32)', 'rgba(255,120,110,.24)', 'rgba(255,180,170,.2)'],
-    base: 0.14, dur: 4.4, label: 'Voice error', icon: 'warn',
-  },
+const LABEL: Record<Speaker, string> = {
+  idle: 'Orion is here',
+  listening: 'Listening',
+  processing: 'Thinking',
+  ai: 'Orion is speaking',
+  unavailable: 'Voice output unavailable',
+  noinput: 'Voice input unavailable in this browser',
+  error: 'Voice error',
 }
 
-const BARS = 40
+const AURA: Record<Speaker, AuraMode> = {
+  idle: 'idle', listening: 'listening', processing: 'processing', ai: 'speaking',
+  unavailable: 'idle', noinput: 'idle', error: 'idle',
+}
 
-/**
- * The voice spectrum and the words share one box: the glow is the background,
- * the transcript sits on top of it. Amplitude is the real measured level when
- * the microphone is open, so the field is alive rather than looping.
- */
 export function VoicePanel({
-  speaker, amplitude = 0, lines, reduceMotion, compact,
+  speaker, lines, reduceMotion, signal, note,
 }: {
   speaker: Speaker
-  amplitude?: number
   lines: Line[]
   reduceMotion: boolean
-  compact?: boolean
+  signal: RefObject<AuraSignal>
+  note?: string | null
 }) {
-  const set = SETS[speaker]
-  const barsRef = useRef<HTMLDivElement | null>(null)
-  const amp = useRef(amplitude)
-  amp.current = amplitude
-
-  useEffect(() => {
-    const host = barsRef.current
-    if (!host || reduceMotion) return
-    const bars = Array.from(host.children) as HTMLElement[]
-    let raf = 0
-    const start = performance.now()
-    const tick = (t: number) => {
-      const s = (t - start) / 1000
-      const level = set.base + amp.current * 0.85
-      for (let i = 0; i < bars.length; i++) {
-        const x = i / (bars.length - 1)
-        const env = Math.pow(Math.sin(Math.PI * x), 1.5)
-        const wobble = 0.55 + 0.45 * Math.sin(s * (2.4 + (i % 5) * 0.18) + i * 0.6)
-        const h = Math.max(0.08, env * level * wobble * 2.1)
-        bars[i].style.transform = `scaleY(${h.toFixed(3)})`
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [set.base, reduceMotion, speaker])
-
   // Keep the newest line in view, from its first word (a long answer is read top-down).
   const linesRef = useRef<HTMLDivElement | null>(null)
   const lastText = lines.length ? `${lines.length}:${lines[lines.length - 1].who}:${lines[lines.length - 1].live ? 'l' : 'f'}` : ''
   useEffect(() => {
     const box = linesRef.current
     const last = box?.lastElementChild as HTMLElement | null
-    if (box && last) box.scrollTop = last.offsetTop - box.offsetTop
+    if (box && last) box.scrollTop = last.offsetTop - box.offsetTop - 18
   }, [lastText])
 
-  const maxBarHeight = compact ? 48 : 84
+  const dim = speaker === 'unavailable' || speaker === 'noinput' || speaker === 'error'
 
   return (
-    <section className="voicepanel" aria-label="Live voice and transcript">
-      <div className="glow" aria-hidden="true">
-        {set.colours.map((c, i) => (
-          <span
-            key={i}
-            className="blob"
-            style={{
-              width: `${[52, 46, 40][i]}%`,
-              height: `${[130, 150, 120][i]}%`,
-              left: `${[6, 44, 70][i]}%`,
-              top: `${[-22, -34, -16][i]}%`,
-              background: c,
-              animation: reduceMotion ? 'none' : `vf-drift-${'abc'[i]} ${(set.dur * [1, 1.25, 0.9][i]).toFixed(1)}s ease-in-out infinite`,
-            }}
-          />
-        ))}
+    <section className={`voicescene vs-${speaker}`} aria-label="Live voice and transcript">
+      <div className="vs-aura" aria-hidden="true">
+        <VoiceAura mode={AURA[speaker]} dim={dim} signal={signal} reduceMotion={reduceMotion} />
       </div>
-      <div className="bars" ref={barsRef} aria-hidden="true">
-        {Array.from({ length: BARS }, (_, i) => (
-          <i key={i} style={{ height: maxBarHeight }} />
-        ))}
-      </div>
-      <div className="veil" aria-hidden="true" />
-
-      <div className="content">
-        <div className="vhead">
-          <Icon name={set.icon} size={13} stroke="#fff" width={1.9} />
-          <span className="cap" style={{ color: '#fff' }}>{set.label}</span>
-          <span style={{ flex: 1 }} />
-          <span className="cap" style={{ color: 'rgba(255,255,255,.55)' }}>Live</span>
-        </div>
+      <div className="vs-text">
+        <div className="vs-state" aria-live="polite"><i aria-hidden="true" />{LABEL[speaker]}</div>
         <div className="lines" ref={linesRef}>
           {lines.length === 0 && (
-            <div className="tline">
-              <span className="who" style={{ color: 'var(--vf-overlay-2)' }}>AI</span>
-              <span className="what" style={{ color: 'rgba(255,255,255,.7)' }}>
-                Say what you are looking at and I will follow along.
-              </span>
+            <div className="tline ai hint">
+              <span className="who">Orion</span>
+              <div className="what">Point the camera at the equipment and ask me what you&rsquo;re looking at.</div>
             </div>
           )}
           {lines.map((l, i) => (
-            <div className="tline" key={i}>
-              <span className="who" style={{ color: l.who === 'You' ? '#fff' : 'var(--vf-overlay-2)' }}>
-                {l.who === 'You' ? 'YOU' : 'AI'}
-              </span>
+            <div className={l.who === 'You' ? 'tline you' : 'tline ai'} key={i}>
+              <span className="who">{l.who === 'You' ? 'You' : 'Orion'}</span>
               <div className="what">
                 {l.who === 'AI' ? <Markdown text={l.text} /> : l.text}
-                {l.live && <i style={{ display: 'inline-block', width: 2, height: '1em', marginLeft: 2, verticalAlign: -2, background: 'rgba(255,255,255,.75)', animation: 'vf-blink 1.1s steps(1) infinite' }} />}
+                {l.live && <i className="vcaret" aria-hidden="true" />}
               </div>
             </div>
           ))}
         </div>
+        {note && <div className="vnote">{note}</div>}
       </div>
     </section>
   )

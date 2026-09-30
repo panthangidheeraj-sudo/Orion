@@ -66,9 +66,11 @@ export const CameraStage = forwardRef<CameraStageHandle, {
   toggles: { detection: boolean; ocr: boolean; tracking: boolean }
   onToggle: (key: 'detection' | 'ocr' | 'tracking') => void
   onRetry: () => void
+  /** Full-screen Live call: no built-in top strip (Live draws its own quiet status). */
+  bare?: boolean
   children?: ReactNode
 }>(function CameraStage({
-  state, elapsed, detections, ocr, selectedId, onSelect, toggles, onToggle, onRetry, children,
+  state, elapsed, detections, ocr, selectedId, onSelect, toggles, onToggle, onRetry, bare, children,
 }, ref) {
   const video = useRef<HTMLVideoElement | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
@@ -156,7 +158,7 @@ export const CameraStage = forwardRef<CameraStageHandle, {
         </div>
       ))}
 
-      <div className="scrim-top">
+      {!bare && <div className="scrim-top">
         <span className="rec"><i />LIVE {fmtDuration(elapsed)}</span>
         <span style={{ flex: 1 }} />
         {(['detection', 'ocr', 'tracking'] as const).map((k) => (
@@ -167,7 +169,7 @@ export const CameraStage = forwardRef<CameraStageHandle, {
             <i />{k}
           </button>
         ))}
-      </div>
+      </div>}
 
       {children}
     </div>

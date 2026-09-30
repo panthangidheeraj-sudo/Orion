@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CameraStage, type CamState, type CameraStageHandle } from '../ui/CameraStage'
 import { VoicePanel, type Line, type Speaker } from '../ui/VoicePanel'
 import { Icon } from '../ui/Icon'
-import { Cap, Chip } from '../ui/bits'
+import { createAuraSignal } from '../ui/VoiceAura'
+import { openMicMeter, type MicMeter } from '../app/micLevel'
 import { useStore } from '../app/store'
 import * as api from '../app/api'
 import {
   listenOnce, recognitionErrorText, speakAnswer, speechSupported, stopSpeaking, ttsSupported,
   type OneShot, type Speech,
 } from '../app/speech'
-import { uid } from '../app/util'
+import { fmtDuration, uid } from '../app/util'
 import type { Detection, DocRef, Evidence, Message, OcrTag } from '../app/types'
 
 /** What the backend told us, last time it told us anything, about each real
@@ -32,7 +33,6 @@ function capsFor(ready: readonly string[] | undefined, ran?: Partial<Record<keyo
 /** The voice loop's four states, and how each looks in the existing panel. */
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking'
 const SPEAKER: Record<VoiceState, Speaker> = { idle: 'idle', listening: 'listening', processing: 'processing', speaking: 'ai' }
-const VOICE_WORD: Record<VoiceState, string> = { idle: 'Idle', listening: 'Listening', processing: 'Processing', speaking: 'Speaking' }
 const VOICE_BUTTON: Record<VoiceState, string> = {
   idle: 'Ask Orion by voice',
   listening: 'Stop listening and send',
@@ -69,7 +69,6 @@ export function Live() {
   /** The voice loop: idle → listening → processing → speaking → idle. */
   const [voice, setVoice] = useState<VoiceState>('idle')
   const [voiceNote, setVoiceNote] = useState<string | null>(null)
-  const [amplitude, setAmplitude] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [lines, setLines] = useState<Line[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -98,7 +97,10 @@ export function Live() {
   /** True while a spoken question owns the frame pipeline; background polling waits. */
   const questionPending = useRef(false)
   const erroredOnce = useRef(false)
-  const decay = useRef<number | null>(null)
+  /** Drives the aura without re-rendering: real mic level, real word events. */
+  const aura = useRef(createAuraSignal())
+  const meter = useRef<MicMeter | null>(null)
+  const [diagOpen, setDiagOpen] = useState(false)
   /** Real backend responses that actually ran during this session — the only
    * material `endLive()` is allowed to draw from. */
   const analysisMessages = useRef<Message[]>([])
@@ -109,15 +111,36 @@ export function Live() {
   const setVoiceState = useCallback((v: VoiceState) => {
     voiceRef.current = v
     setVoice(v)
-    if (v === 'idle' || v === 'processing') setAmplitude(0)
   }, [])
 
-  /** A short pulse on the glow, driven by real events (a recognised word, a spoken word). */
+  /** A short burst on the aura, driven by real events (a recognised word, a spoken word). */
   const pulse = useCallback((level: number) => {
-    setAmplitude(level)
-    if (decay.current) window.clearTimeout(decay.current)
-    decay.current = window.setTimeout(() => setAmplitude(0.12), 260)
+    aura.current.kickLevel = level
+    aura.current.kickAt = performance.now()
   }, [])
+
+  /* While Orion listens, read the real microphone level for the aura (desktop
+     browsers; see app/micLevel.ts). Opened a moment after the recognizer so it
+     never races it for the device, and closed the instant listening ends. */
+  useEffect(() => {
+    if (voice !== 'listening') return
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      void openMicMeter().then((m) => {
+        if (!m) return
+        if (cancelled) { m.close(); return }
+        meter.current = m
+        aura.current.mic = m.read
+      })
+    }, 250)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+      aura.current.mic = null
+      meter.current?.close()
+      meter.current = null
+    }
+  }, [voice])
 
   useEffect(() => {
     if (!activeId) newConversation('Live inspection')
@@ -140,6 +163,11 @@ export function Live() {
       setCam(name === 'NotFoundError' || name === 'OverconstrainedError' ? 'missing' : name === 'NotAllowedError' ? 'denied' : 'error')
     }
   }, [])
+
+  const toggleCamera = useCallback(() => {
+    if (cam === 'live' || cam === 'starting') setCam('idle')
+    else void startCamera()
+  }, [cam, startCamera])
 
   /* --------------------------------------------------- real backend frames */
 
@@ -398,7 +426,7 @@ export function Live() {
   useEffect(() => () => {
     rec.current?.abort()
     stopSpeaking()
-    if (decay.current) window.clearTimeout(decay.current)
+    meter.current?.close()
   }, [])
 
   /* ---------------------------------------------------------- end & hand off */
@@ -478,11 +506,25 @@ export function Live() {
   }
 
   const selectedDet = detections.find((d) => d.id === selected)
+  const camOn = cam === 'live' || cam === 'starting'
+  const hint = !backend.online
+    ? 'The Orion backend is offline — the camera still works, but frames are not analysed.'
+    : frameError
+      ? `Live analysis paused — ${frameError}`
+      : capStatus.detector === 'unavailable'
+        ? 'No detection model on this backend — press the mic and ask, and Orion reads the frame itself.'
+        : selectedDet
+          ? `${selectedDet.label} is being tracked across frames.`
+          : detections.length
+            ? 'Tap any component to focus the analysis on it.'
+            : 'No verified detections yet.'
+  const note = voiceNote ?? (!canSpeak ? 'Voice output is unavailable in this browser — answers are shown as text.' : null)
 
   return (
-    <div className="live">
+    <div className="live live-call">
       <CameraStage
         ref={stageRef}
+        bare
         state={cam}
         elapsed={elapsed}
         detections={detections.map((d) => (d.id === selected ? { ...d, tone: 'selected' as const } : d))}
@@ -492,103 +534,97 @@ export function Live() {
         toggles={toggles}
         onToggle={(k) => setToggles((t) => ({ ...t, [k]: !t[k] }))}
         onRetry={startCamera}
-      >
-        {cam === 'live' && (
-          <div className="scrim-bottom">
-            <Icon name="target" size={15} stroke="rgba(255,255,255,.5)" width={1.7} />
-            <span style={{ fontSize: 12.5, color: 'rgba(255,255,255,.66)' }}>
-              {!backend.online
-                ? 'The Orion backend is offline — the camera still works, but frames are not analysed.'
-                : frameError
-                  ? `Live analysis paused — ${frameError}`
-                  : capStatus.detector === 'unavailable'
-                    ? 'No detection model on this backend — press the mic and ask, and Orion reads the frame itself.'
-                    : selectedDet
-                  ? `${selectedDet.label} is being tracked across frames.`
-                  : detections.length
-                    ? 'Tap any component to focus the analysis on it.'
-                    : 'No verified detections yet.'}
-            </span>
-          </div>
-        )}
-      </CameraStage>
+      />
+      <div className="live-shade" aria-hidden="true" />
 
-      <div className="live-lower">
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '0 2px 8px' }}>
-          <CapChip name="Detection" state={capStatus.detector} />
-          <CapChip name="OCR" state={capStatus.ocr} />
-          <CapChip name="Tracking" state={capStatus.tracker} />
-          <CapChip name="Reasoning" state={capStatus.reasoning} />
-        </div>
-
-        <VoicePanel
-          speaker={!sttSupported && voice === 'idle' ? 'noinput' : SPEAKER[voice]}
-          amplitude={amplitude}
-          lines={lines}
-          reduceMotion={prefs.reduceMotion}
-        />
-
-        <div className="live-controls">
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="target" size={13} stroke={selectedDet ? 'var(--vf-text)' : 'rgba(255,255,255,.35)'} width={1.9} />
-              <Cap style={{ color: selectedDet ? 'var(--vf-text)' : undefined }}>
-                {selectedDet ? 'Selected object' : 'No object selected'}
-              </Cap>
+      {/* Quiet status corner: LIVE ● 00:42, and the diagnostics behind one button. */}
+      <div className="live-status">
+        <span className="live-badge"><i aria-hidden="true" />LIVE <span className="mono">{fmtDuration(elapsed)}</span></span>
+        <button
+          type="button" className="live-more" aria-label="Live details" title="Live details"
+          aria-expanded={diagOpen} onClick={() => setDiagOpen((o) => !o)}
+        >
+          <Icon name="dots" size={16} width={2} />
+        </button>
+        {diagOpen && (
+          <div className="live-diag" role="dialog" aria-label="Live details">
+            <div className="live-diag-caps">
+              <CapChip name="Detection" state={capStatus.detector} />
+              <CapChip name="OCR" state={capStatus.ocr} />
+              <CapChip name="Tracking" state={capStatus.tracker} />
+              <CapChip name="Reasoning" state={capStatus.reasoning} />
             </div>
+            <p className="live-diag-hint">{hint}</p>
             {selectedDet && (
-              <>
-                <b style={{ display: 'block', fontSize: 14, marginTop: 6 }}>{selectedDet.label}</b>
-                <span className="mono" style={{ fontSize: 10.5, color: 'rgba(255,255,255,.5)' }}>
-                  Tracking · {selectedDet.confidence.toFixed(2)} confidence
-                </span>
-              </>
+              <p className="live-diag-hint" style={{ color: '#fff' }}>
+                Selected: <b>{selectedDet.label}</b> · {selectedDet.confidence.toFixed(2)} confidence
+              </p>
+            )}
+            <div className="live-diag-row">
+              {(['detection', 'ocr', 'tracking'] as const).map((k) => (
+                <button
+                  key={k} type="button" className="camtoggle" aria-pressed={toggles[k]}
+                  onClick={() => setToggles((t) => ({ ...t, [k]: !t[k] }))}
+                >
+                  <i />{k}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="live-diag-btn" onClick={() => void captureFrameEvidence()} disabled={cam !== 'live'}>
+              <Icon name="square" size={15} width={1.8} /> Capture frame as evidence
+            </button>
+            {active && active.messages.length > 0 && (
+              <p className="live-diag-hint">Continuing “{active.title}” — everything here joins the same conversation.</p>
             )}
           </div>
-
-          <div className="row">
-            <button
-              type="button"
-              className={voice === 'idle' ? 'ibtn glass xl' : 'ibtn rec xl'}
-              aria-label={VOICE_BUTTON[voice]}
-              title={VOICE_BUTTON[voice]}
-              aria-pressed={voice !== 'idle'}
-              disabled={voice === 'idle' && !sttSupported}
-              onClick={() => (voice === 'idle' ? startListening() : stopVoice())}
-            >
-              <Icon name={voice === 'idle' || voice === 'listening' ? 'mic' : 'stop'} size={24} />
-            </button>
-            <span className="cap voice-state" aria-live="polite">{VOICE_WORD[voice]}</span>
-            <span style={{ flex: 1 }} />
-            <button type="button" className="ibtn glass" aria-label="Capture frame" onClick={() => void captureFrameEvidence()}>
-              <Icon name="square" size={19} />
-            </button>
-            <button
-              type="button" className="ibtn glass" aria-label={cam === 'live' ? 'Restart camera' : 'Start camera'}
-              onClick={startCamera}
-            >
-              <Icon name="cam" size={19} />
-            </button>
-          </div>
-
-          <button type="button" className="endlive" onClick={endLive}>
-            <Icon name="stop" size={17} stroke="#ff9e96" width={1.9} />
-            End Live &amp; continue in chat
-          </button>
-        </div>
+        )}
       </div>
 
-      {(voiceNote || !canSpeak) && (
-        <Chip icon="info" size="sm">
-          {voiceNote ?? 'Voice output is unavailable in this browser — answers are shown as text.'}
-        </Chip>
-      )}
+      {/* Lower left: Orion's aura and the conversation, part of the camera scene. */}
+      <VoicePanel
+        speaker={!sttSupported && voice === 'idle' ? 'noinput' : SPEAKER[voice]}
+        lines={lines}
+        reduceMotion={prefs.reduceMotion}
+        signal={aura}
+        note={note}
+      />
 
-      {active && active.messages.length > 0 && (
-        <span className="cap" style={{ textAlign: 'center' }}>
-          Continuing “{active.title}” — everything here joins the same conversation
-        </span>
-      )}
+      {/* The call dock: mic, camera, end — three glass circles on the video. */}
+      <div className="live-dock" role="group" aria-label="Call controls">
+        <div className="callitem">
+          <button
+            type="button"
+            className={`callbtn${voice === 'listening' ? ' on' : ''}${voice === 'processing' || voice === 'speaking' ? ' busy' : ''}`}
+            aria-label={VOICE_BUTTON[voice]}
+            title={VOICE_BUTTON[voice]}
+            aria-pressed={voice !== 'idle'}
+            disabled={voice === 'idle' && !sttSupported}
+            onClick={() => (voice === 'idle' ? startListening() : stopVoice())}
+          >
+            <Icon name={voice === 'idle' || voice === 'listening' ? 'mic' : 'stop'} size={25} width={1.8} />
+          </button>
+          <span aria-hidden="true">{voice === 'idle' ? 'Speak' : voice === 'listening' ? 'Send' : 'Stop'}</span>
+        </div>
+        <div className="callitem">
+          <button
+            type="button"
+            className={camOn ? 'callbtn' : 'callbtn off'}
+            aria-label={camOn ? 'Turn camera off' : 'Turn camera on'}
+            title={camOn ? 'Turn camera off' : 'Turn camera on'}
+            aria-pressed={camOn}
+            onClick={toggleCamera}
+          >
+            <Icon name="cam" size={25} width={1.8} />
+          </button>
+          <span aria-hidden="true">Camera</span>
+        </div>
+        <div className="callitem">
+          <button type="button" className="callbtn end" aria-label="End Live and continue in chat" title="End Live" onClick={endLive}>
+            <Icon name="x" size={25} width={2.2} />
+          </button>
+          <span aria-hidden="true">End</span>
+        </div>
+      </div>
     </div>
   )
 }
