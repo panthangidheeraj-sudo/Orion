@@ -13,15 +13,8 @@ function wordChunks(text?: string): string[] {
   return text ? text.match(/\S+\s*/g) ?? [] : []
 }
 
-const REVEAL_CURSOR = (
-  <i
-    aria-hidden
-    style={{
-      display: 'inline-block', width: 2, height: '1em', marginLeft: 1, verticalAlign: -3,
-      background: 'var(--vf-text)', animation: 'vf-blink 1.1s steps(1) infinite',
-    }}
-  />
-)
+/** The live edge of a streaming answer: a small soft-glowing point. */
+const REVEAL_CURSOR = <i aria-hidden className="reveal-caret" />
 
 /** One heading per kind of finding. The backend sends each finding as its own
  * item; they are grouped here so an answer reads as a few sections with lists,
@@ -142,16 +135,28 @@ export function AssistantMessage({
     // character-by-character was explicitly ruled out. Self-clearing once
     // the plan is fully revealed, rather than depending on `revealed` and
     // re-subscribing every tick.
+    // Pace scales with length: a short reply reads in at ~2 words per tick, a
+    // long technical answer reveals in bigger word-groups so it never takes
+    // more than ~3s to finish — natural, never a slow typewriter.
+    const step = Math.max(2, Math.ceil(plan.total / 70))
     const t = window.setInterval(() => {
       setRevealed((r) => {
         if (r >= plan.total) { window.clearInterval(t); return r }
-        return Math.min(plan.total, r + 2)
+        return Math.min(plan.total, r + step)
       })
-    }, 55)
+    }, 42)
     return () => window.clearInterval(t)
   }, [plan.total, prefs.reduceMotion])
 
   const done = revealed >= plan.total
+  // Stays "revealing" a moment past the last word so the final block's rise
+  // animation completes instead of snapping; after that the message is static.
+  const [settled, setSettled] = useState(done)
+  useEffect(() => {
+    if (!done || settled) return
+    const t = window.setTimeout(() => setSettled(true), 320)
+    return () => window.clearTimeout(t)
+  }, [done, settled])
   // Walks the plan from the start; each piece is shown in proportion to how
   // far `revealed` has got past the point where that piece begins.
   let cursor = 0
@@ -174,7 +179,7 @@ export function AssistantMessage({
   const footerShown = plan.hasFooter ? takeBlock() : false
 
   return (
-    <article className="answer vf-enter">
+    <article className={settled ? 'answer vf-enter' : 'answer vf-enter revealing'} aria-busy={!done}>
       <div className="answer-head">
         <AiMark />
         <div className="id">
@@ -301,8 +306,9 @@ export function WorkTrail({ steps, index }: { steps: Step[]; index: number }) {
   const realSteps = steps.filter((s) => s.label !== 'Thinking')
   if (!realSteps.length) {
     return (
-      <div className="activity vf-enter" role="status" aria-label="Orion is replying">
-        <AiMark size={26} />
+      <div className="activity vf-enter" role="status" aria-label="Orion is thinking">
+        <span className="think-orb" aria-hidden="true"><AiMark size={26} /></span>
+        <span className="think-label">Orion is thinking</span>
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
       </div>
     )
@@ -312,7 +318,7 @@ export function WorkTrail({ steps, index }: { steps: Step[]; index: number }) {
   return (
     <article className="answer vf-enter">
       <div className="answer-head">
-        <AiMark />
+        <span className="think-orb" aria-hidden="true"><AiMark /></span>
         <div className="id">
           <b>Orion is working</b>
           <Cap>{Math.min(index + 1, steps.length)} of {steps.length}</Cap>

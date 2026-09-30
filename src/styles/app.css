@@ -507,6 +507,40 @@ ol.rsec-list > li::marker { font-family: var(--vf-mono); font-size: 0.86em; }
 .activity .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--vf-text-2); animation: vf-pulse 1.25s ease-in-out infinite; }
 .activity .dots i:nth-child(2) { animation-delay: 0.16s; }
 .activity .dots i:nth-child(3) { animation-delay: 0.32s; }
+.activity .think-label { font-size: 13px; color: var(--vf-text-2); letter-spacing: 0.01em; }
+
+/* Thinking: a soft blue halo breathes around the Orion mark while one small
+   point orbits it. Pure CSS, two layers, no layout work. */
+.think-orb { position: relative; display: inline-flex; flex: none; border-radius: 10px; }
+.think-orb::before {
+  content: ''; position: absolute; inset: -4px; border-radius: 13px; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(93,139,255,0.34), rgba(93,139,255,0) 72%);
+  animation: vf-think-halo 2.2s ease-in-out infinite;
+}
+.think-orb::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
+  border-radius: 50%; background: #a9c2ff; box-shadow: 0 0 6px 1px rgba(125,160,255,0.75);
+  animation: vf-think-orbit 1.8s linear infinite; pointer-events: none;
+}
+@keyframes vf-think-halo { 0%, 100% { opacity: 0.35; transform: scale(0.94); } 50% { opacity: 1; transform: scale(1.06); } }
+@keyframes vf-think-orbit { from { transform: rotate(0deg) translateX(17px); } to { transform: rotate(360deg) translateX(17px); } }
+.activity .dots i { background: #a9c2ff; }
+
+/* Streaming reveal. While an answer types in, every new paragraph, heading,
+   bullet or section eases up into place as it first appears; words inside it
+   arrive in small groups. The class is dropped when the reveal finishes, so a
+   finished message is static and never animates again on re-render. */
+.answer.revealing .md > *,
+.answer.revealing .md li,
+.answer.revealing .rsec-h,
+.answer.revealing .notice,
+.answer.revealing .confidence { animation: vf-rise 260ms var(--vf-ease) both; }
+@keyframes vf-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.reveal-caret {
+  display: inline-block; width: 6px; height: 6px; margin-left: 4px; vertical-align: 1px; border-radius: 50%;
+  background: #a9c2ff; box-shadow: 0 0 8px 1px rgba(125,160,255,0.7);
+  animation: vf-pulse 1s ease-in-out infinite;
+}
 .trail { display: flex; flex-direction: column; gap: 2px; }
 .trail .step { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 11px; font-size: 13.5px; }
 .trail .step.run { background: var(--vf-track); font-weight: 600; }

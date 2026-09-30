@@ -89,9 +89,9 @@ export default function GooeyNav({
     let d = particleDistances
     let kx = 1
     if (variant === 'top') {
-      const ry = element.offsetHeight / 2 + 12
+      const ry = element.offsetHeight / 2 - 1
       d = [ry, particleDistances[1]]
-      kx = (element.offsetWidth / 2 + 12) / ry
+      kx = (element.offsetWidth / 2 + 4) / ry
     }
     const r = particleR
     const bubbleTime = animationTime * 2 + timeVariance
@@ -106,7 +106,7 @@ export default function GooeyNav({
       // would turn sideways bubbles vertical and clip them, so keep it small.
       if (variant === 'top') {
         p.rotate *= 0.15
-        p.scale *= 0.55 // desktop: smaller, quieter bubbles than the phone tab bar
+        p.scale *= 0.8 // desktop: a little smaller and fewer than the phone tab bar
       }
       element.classList.remove('active')
 

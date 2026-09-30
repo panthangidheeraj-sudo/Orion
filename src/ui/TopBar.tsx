@@ -25,7 +25,7 @@ function useNav(iconSize: number) {
     label: n.label,
     href: `#${n.route}`,
     // currentColor, so the icon flips with the label when its item is active.
-    icon: <Icon name={n.icon} size={iconSize} stroke="currentColor" />,
+    icon: <Icon name={n.icon} size={iconSize} stroke="currentColor" width={1.8} />,
   }))
   const activeIndex = NAV.findIndex((n) => isCurrent(n.route, route))
   const onSelect = (i: number) => go(NAV[i].route)
@@ -34,12 +34,12 @@ function useNav(iconSize: number) {
 
 /** Desktop / tablet: the centred pill under the logo. */
 export function TopBar() {
-  const nav = useNav(16)
+  const nav = useNav(18)
   return (
     <div className="vf-nav">
       {/* A quieter version of the phone tab bar's burst: fewer, smaller bubbles,
           stretched to hug this wider pill (see GooeyNav makeParticles). */}
-      <GooeyNav {...nav} variant="top" ariaLabel="Primary" particleDistances={[60, 8]} particleCount={6} />
+      <GooeyNav {...nav} variant="top" ariaLabel="Primary" particleDistances={[60, 8]} particleCount={9} />
     </div>
   )
 }
