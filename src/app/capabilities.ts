@@ -38,7 +38,7 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
       ? { key: 'backend', label: 'Backend', state: 'ready', word: 'Online', detail: 'The Orion backend answered its health check.' }
       : {
           key: 'backend', label: 'Backend', state: 'error', word: 'Offline',
-          detail: `The backend did not answer${backend.reason ? ` (${backend.reason})` : ''}, even after about a minute and a half of retries — the built-in demo responder is being used. Orion keeps checking every 30 seconds and will reconnect on its own.`,
+          detail: `The backend did not answer${backend.reason ? ` (${backend.reason})` : ''}, even after about a minute and a half of retries — Orion cannot interpret requests until it reconnects. Your files and history stay available. Orion keeps checking every 30 seconds and will reconnect on its own.`,
         }
 
   const model = backend.model

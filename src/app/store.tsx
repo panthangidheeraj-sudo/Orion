@@ -212,8 +212,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     runProbe()
   }, [runProbe])
 
-  // The backend is optional. If it is not running the app still works, on the
-  // local demo responder, and says so rather than pretending.
+  // The backend is optional for the app shell. If it is not running, the camera,
+  // files and history still work, but Orion cannot interpret a request: it shows
+  // an offline message and says so rather than pretending.
   useEffect(() => {
     wakeStart.current = Date.now()
     runProbe()

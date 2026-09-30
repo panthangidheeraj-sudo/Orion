@@ -1,7 +1,9 @@
 # Orion — backend
 
-A local-first multimodal field-technician agent. Python + FastAPI, running
-entirely on the machine in front of the technician.
+A multimodal field-technician agent. Python + FastAPI. It is designed local-first:
+on a Snapdragon PC everything, including the reasoning model, runs on the machine in
+front of the technician. The same code also runs as a hosted deployment (Render) with a
+hosted reasoning model — see [Three ways it runs](#three-ways-it-runs).
 
 > **The VLM is the brain. Everything else is a sense, memory store, or tool.**
 
@@ -37,9 +39,40 @@ That prints exactly what loaded, on which accelerator, and why anything is
 missing. **Run it before a demo.** It is the file that stops you claiming
 something the machine is not doing.
 
-The front-end finds the service automatically and falls back to its built-in
-demo responder when it is not running. Override the address with
-`VITE_VF_BACKEND` if you move the port.
+The front-end finds the service automatically. When it is not running the app
+shows an explicit "offline" message rather than an answer — it has no reasoning of
+its own. Override the address with `VITE_VF_BACKEND` if you move the port.
+
+---
+
+## Three ways it runs
+
+The status endpoint (`GET /api/models/status`) says which one is answering; nothing
+is ever presented as another.
+
+| | Snapdragon on-device | Deployed hosted demo | Optional private vision service |
+|---|---|---|---|
+| Reasoning | Qwen3-VL-4B-Instruct via GenieX + QAIRT (`geniex-qwen3-vl`) | Hosted multimodal model on Groq (`hosted-groq`, `qwen/qwen3.8-27b`) | none — perception adapters only |
+| Runs on | Windows ARM64 Snapdragon (Hexagon NPU) | Render `orion-api` web service | Render `orion-vision` private service |
+| Reported as | `npu: true` only after a real generation runs on the QAIRT plugin | `hosted: true`, `accelerator: remote`, `npu: false` | `npu: false` (CPU on Render) |
+| Validation | **Implemented; on-hardware validation pending** | Live | Optional; needs model assets provisioned |
+
+- **Hosted Groq** (`app/models/hosted.py`) is used only when a key is set
+  (`GROQ_API_KEY` / `VF_HOSTED_LLM_API_KEY`, server environment only, never returned or
+  logged). Photos and camera frames for a turn are sent to the provider as downscaled JPEG
+  data URLs — a hosted model can only see what it is sent — so this path is not
+  "nothing leaves the machine". It is used with `VF_REASONING_PROVIDER=hosted-groq`, or by
+  `auto` after GenieX. If the key is missing or wrong, the quota is spent or the host is
+  unreachable, reasoning is `unavailable`; there is no stand-in model.
+- **The private vision service** (`app/vision_service.py`, deployed by `render.yaml`)
+  exposes detector / classifier / segmenter / tracker / OCR adapters to `orion-api` over
+  private HTTP with an internal key. The deployed Render demo uses hosted multimodal
+  reasoning for image understanding; the vision service provides detector, OCR and
+  segmentation adapters for deployments where those model assets are provisioned. No model
+  weights are in the repository, and none of this has been validated on Snapdragon
+  hardware. See [docs/RENDER.md](docs/RENDER.md).
+- **Snapdragon path**: see the section below and
+  [docs/SNAPDRAGON_SETUP.md](docs/SNAPDRAGON_SETUP.md).
 
 ---
 
@@ -66,10 +99,14 @@ someone reports sparks, smoke or exposed conductors.
 
 ### Running the real model: Qwen3-VL-4B-Instruct on the Snapdragon NPU
 
-Orion's reasoning model is **Qwen3-VL-4B-Instruct**, run in-process through
+Orion's on-device reasoning model is **Qwen3-VL-4B-Instruct**, run in-process through
 Qualcomm **GenieX + QAIRT** on the Hexagon NPU (Snapdragon X Elite, X Plus
 8-Core, X2 Elite; Windows ARM64). One model does everything: the router,
 conversation, and the technical reasoning loop with photos.
+
+**Status: implemented; on-hardware validation is pending.** It has not yet run on a
+Snapdragon NPU (see [MODEL_STATUS.md](MODEL_STATUS.md)). The hosted Render deployment
+uses a different model (Groq) and never claims this path.
 
     pip install -r requirements-snapdragon.txt        # ARM64 Python 3.10+
     geniex pull ai-hub-models/Qwen3-VL-4B-Instruct
@@ -95,22 +132,24 @@ reported unavailable with the reason.
 ```
 backend/
 ├── app/
-│   ├── main.py             FastAPI app, CORS locked to localhost, error envelope
+│   ├── main.py             FastAPI app, CORS (localhost by default, VF_CORS_ORIGINS), error envelope
+│   ├── security.py         optional shared access key, rate limits
+│   ├── vision_service.py   the private orion-vision service (Render)
 │   ├── config.py           every setting, env-driven; no secrets in source
 │   ├── util.py             ids, path containment, log-safe previews
 │   ├── errors.py           the §25 structured error shape
 │   ├── logging_setup.py    redaction filter — no documents, audio or frames in logs
-│   ├── api/                the 20 endpoints
-│   ├── agent/              orchestrator, prompts, tools, context, safety, live, conversation
-│   ├── models/             the nine adapters + ONNX/QNN runtime + registry
+│   ├── api/                the routes (chat, photo, live, documents, jobs, voice, system, …)
+│   ├── agent/              orchestrator, router, prompts, tools, context, safety, live session
+│   ├── models/             the nine adapters (incl. geniex, hosted, remote) + ONNX/QNN runtime + registry
 │   ├── metrics.py          the §23 figures this process can measure truthfully
 │   ├── knowledge/          ingest, extraction, page rendering, chunking, retrieval, web
 │   ├── memory/             SQLite, schema, vector store, memory service
 │   ├── tools/              the 19 agent tools
 │   └── schemas/            request/response models
 ├── data/                   database, documents, images, audio, reports, models
-├── tests/                  104 tests + the §27 fixtures, no network, isolated data
-└── scripts/                run.ps1, check_models.py
+├── tests/                  170 tests (+14 hardware/opt-in skips) and the §27 fixtures
+└── scripts/                run.ps1, check_models.py, verify_all.py, geniex_smoke.py, hosted_smoke.py, Device Cloud scripts
 ```
 
 ---
@@ -255,6 +294,31 @@ story is inspectable:
 
 A 6-frame session where only 2 frames woke the model is a result you can show.
 
+### How the web app drives it (current Live Mode)
+
+The Live screen is a full-screen camera call with voice. It calls `POST /api/live/start`
+when the camera goes live, then `POST /api/live/frame` with a JPEG grabbed from the video,
+and `POST /api/live/stop` when the camera stops or the session ends.
+
+- **A spoken question** is sent with the current frame as `question` + `deep=true`. That is
+  a "technician asked" event, so the reasoning model runs on that frame. The answer is shown
+  in the Live panel and spoken with the *browser's* speech synthesis; each question and
+  answer is added to the conversation once.
+- **Background frames** (no question) are sent about once a second **only when the backend
+  reports a detector or OCR as ready**. With neither (the hosted deployment) the app sends
+  no background frames, so no hosted-model call is spent on scene changes and the user's own
+  question is not rate-limited out.
+- The Live status chips (Detection / OCR / Tracking / Reasoning) show `running` only when
+  the frame's `ran` flag says so, `idle` when the role is ready but had nothing to do, and
+  `unavailable` when `/api/models/status` does not list it as ready.
+- Detection boxes and OCR overlays are drawn only from real `detections` and
+  `text_regions` in the response. A backend with no detector produces none.
+- A `404`/`410` for the session (a restarted hosted backend) re-opens the session once.
+- `keep` and `target_label` exist on the endpoint; the current web app sends neither.
+  Frames that did not wake the model are discarded from disk.
+- The web app does not call `/api/voice/synthesize` from Live (`api.synthesizeSpeech()` is
+  written but unused there); spoken answers come from the browser.
+
 ---
 
 ## Knowledge priority
@@ -310,13 +374,24 @@ relevant hazard notice (electrical, rotating, thermal, pressure, chemical).
   anything that escapes its root.
 - **`fetch_web_source` refuses loopback, link-local and private addresses**, so
   a fetch tool cannot be used to reach the machine it runs on.
-- **A remote reasoning endpoint is refused outright.** The OpenAI-compatible
-  adapter checks the host against the loopback interface — local-first means a
-  camera frame cannot be posted off the device by configuration mistake.
+- **The local OpenAI-compatible adapter refuses a remote endpoint.**
+  `local-openai-compat` checks the host against the loopback interface, so on the
+  local path a camera frame cannot be posted off the device by configuration
+  mistake. Hosted reasoning is the one deliberate exception: `hosted-groq` is a
+  separate, explicitly selected provider that sends the turn's photos to Groq, is
+  labelled hosted in every status report, and is used only when its key is set.
 - **Logs are redacted**: credentials, data URIs and long base64 blobs are
   stripped and every record is truncated.
 - **No API keys in source.** The environment is the only channel.
-- **CORS is restricted to localhost origins.** This is not a general web API.
+- **CORS is restricted** to localhost origins by default; a hosted deployment lists its
+  frontend's origin(s) in `VF_CORS_ORIGINS`. This is not a general web API.
+- **An access key gates a reachable backend.** With `VF_ACCESS_TOKEN` set, every `/api`
+  route except the health and model-status probes needs it (`X-Orion-Key`), requests are
+  rate-limited per client, and interactive docs are hidden. A backend reachable from the
+  internet (Render, a LAN address) must set it.
+- **The private vision service** is authenticated with a separate internal key
+  (`X-Orion-Internal-Key`, constant-time compare), has no public URL and refuses to
+  start without the key.
 
 ---
 
@@ -333,7 +408,7 @@ relevant hazard notice (electrical, rotating, thermal, pressure, chemical).
 | `GET` `POST` `DELETE` `/api/memories` | durable memory |
 | `GET` `PATCH` `/api/user` | the local technician and their durable preferences |
 | `POST` `GET` `/api/reports` | service reports |
-| `POST /api/voice/transcribe` · `/synthesize` | voice |
+| `POST /api/voice/transcribe` · `/synthesize` · `GET /audio/{id}` | voice (degrades when no speech model is installed) |
 | `GET /api/system/status` · `/api/models/status` · `/api/metrics` · `/api/health` | status |
 | `POST /api/models/reload` | re-probe adapters after an export |
 | `GET /api/tools` · `POST /api/tools/call` | the allowlist, and direct invocation |
@@ -365,7 +440,7 @@ reports `npu: false` because this process cannot verify what that server runs on
 ## Tests
 
 ```bash
-python -m pytest tests/ -q          # 125 unit and integration tests
+python -m pytest tests/ -q          # 170 passed, 14 skipped (hardware / opt-in) on the last run
 
 # On the Snapdragon machine, against the real Qwen3-VL-4B-Instruct (router QA + image reasoning):
 set ORION_GENIEX_TEST=1
@@ -376,8 +451,12 @@ And against a running server, which is the one to use before a demo:
 
 ```bash
 python -m app.main &                # in another terminal
-python scripts/verify_all.py        # 82 checks over the real HTTP surface
+python scripts/verify_all.py        # 70 checks over the real HTTP surface (no reasoning model)
 ```
+
+With no reasoning model loaded, the checks that need a model are skipped rather than
+faked, so the count is 70; more run when a model is configured. A deployed backend needs
+`VF_ACCESS_TOKEN=... python scripts/verify_all.py <url>`.
 
 `verify_all.py` drives the endpoints the front-end actually uses, in the order a
 technician would, and asserts the behaviour the specification asks for rather
@@ -386,7 +465,8 @@ live loop does not wake the model on an unchanged scene but does when the
 technician pans or asks, that a measurement without a value is refused, that a
 renamed executable is not accepted as a PDF, and that nothing claims the NPU.
 
-104 tests, no network, each on a throwaway data directory. They cover the §14
+The unit suite makes no network calls (hosted and Snapdragon paths are tested against
+stand-in doubles) and runs each test on a throwaway data directory. It covers the §14
 schema, path traversal, log redaction, honest model status, every §3 candidate
 being selectable, both document representations, page-accurate citation,
 content-sniffed uploads, the agent loop quoting and citing a manual, the safety
@@ -439,10 +519,21 @@ cannot confirm what is in the picture* rather than describing it.
 
 Stated plainly, because a hackathon demo is easier to defend than to repair:
 
-- **No model has been compiled or profiled with Qualcomm AI Hub Workbench.**
-  Phase 9 of the implementation order is untouched. The ONNX/QNN path is
-  written and the accelerator is read back from the runtime, but it has not
-  been exercised on Snapdragon hardware from here.
+- **The Snapdragon GenieX + QAIRT path is not yet validated on hardware.** The
+  provider, smoke test and hardware tests are written and their plumbing is tested
+  against a stand-in of the GenieX API; the Qualcomm AI Hub export for Snapdragon
+  X Elite has been downloaded. Nothing has run on a Snapdragon NPU, and the Device
+  Cloud validation scripts have not been run, so there are no on-device latency,
+  tokens/s or accuracy figures. `MODEL_STATUS.md` holds the empty results tables.
+- **No model has been compiled or profiled by this project with Qualcomm AI Hub
+  Workbench.** Phase 9 of the implementation order is untouched. The ONNX/QNN path
+  is written and the accelerator is read back from the runtime, but it has not been
+  exercised on Snapdragon hardware from here.
+- **The deployed Render demo has no perception model assets.** Detector, classifier,
+  segmenter, OCR, speech-to-text and text-to-speech report `unavailable` there; the
+  classical tracker and the synthetic lexical embedding are active. The optional
+  `orion-vision` service is deployment architecture that answers only once assets
+  are provisioned, and is not validated on Snapdragon hardware.
 - **Segmentation, EdgeTAM tracking, Whisper and TrOCR load their sessions but
   do not complete inference** — their I/O signatures are bound to the specific
   export, which does not exist yet. Each raises the §25 envelope rather than

@@ -259,5 +259,12 @@ with the reason).
 ## The hosted (Render) deployment
 
 The cloud deployment does not have a Snapdragon NPU and does not install
-GenieX. There, reasoning reports `unavailable`, which is correct. Nothing on
-Render depends on this machine.
+GenieX, so the GenieX provider reports itself unavailable there. The deployed
+demo answers with a different, hosted model — Groq (`VF_REASONING_PROVIDER=hosted-groq`,
+`qwen/qwen3.8-27b`) — reported as `hosted: true`, `accelerator: remote`,
+`npu: false`, and never described as on-device or as running on the NPU. See
+[RENDER.md](RENDER.md). Nothing on Render depends on this machine, and nothing
+about the Snapdragon path is validated by the hosted demo.
+
+This setup guide describes the Snapdragon path, which is **implemented but not yet
+validated on hardware**; see [../MODEL_STATUS.md](../MODEL_STATUS.md).

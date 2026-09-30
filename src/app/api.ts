@@ -7,9 +7,10 @@
  *
  * It degrades on purpose. If the service is not running — during design work,
  * on a machine where the models have not been exported, or while the backend
- * restarts — `probe()` returns false and the app falls back to the local
- * demo responder in `assistant.ts`. The UI shows which of the two answered,
- * so a demo can never accidentally pass off the stub as the real thing.
+ * restarts — `probe()` returns false and the app shows an honest offline
+ * state instead of an answer. The client has no reasoning of its own, so
+ * without the backend (and a reasoning model behind it) Orion cannot
+ * interpret a request, and it says so rather than imitating understanding.
  */
 
 import type { DocRef, Detection, Message, Mode, NoticeBlock, OcrTag, Section, SectionKind, Step } from './types'
@@ -73,8 +74,9 @@ export interface BackendInfo {
    * never "Offline", before it actually knows. */
   checked?: boolean
   /** Answered its health check but refused our access key (or we have none).
-   * `online` is false in that case, so every caller falls back to the demo
-   * responder; this flag only lets the status strip say why. */
+   * `online` is false in that case, so every caller treats the backend as
+   * unavailable (an offline state, no answer); this flag only lets the status
+   * strip say why. */
   locked?: boolean
   /** Set by the app (store.tsx), never by the backend: this is the cold-start
    * window — the host may be waking from sleep or mid-deploy, so "not answering
@@ -194,8 +196,8 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
  * Ask the agent, streaming.
  *
  * The backend sends its work trail before any text, so `onStep` fires with
- * real tool results — "2 passages from your documents" — rather than the
- * invented timings the offline stub uses.
+ * real tool results — "2 passages from your documents" — never invented
+ * timings.
  */
 export async function ask(text: string, opts: AskOptions): Promise<AskResult> {
   const res = await apiFetch('/api/chat/stream', {

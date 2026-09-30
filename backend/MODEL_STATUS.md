@@ -15,10 +15,27 @@ target machine as exports are validated, not left as written here.
 
 ## Where this build stands
 
-**No Qualcomm AI Hub model has been compiled, profiled or exported for this
-project yet.** The adapters are written and the runtime path to the NPU is
-implemented, but nothing has been validated on Snapdragon hardware from this
-environment, because this environment has no Snapdragon device attached.
+**No model has been validated on Snapdragon hardware yet.** The adapters are
+written and the runtime path to the NPU is implemented, and a Qualcomm AI Hub
+Models export of Qwen3-VL-4B-Instruct has been downloaded (see below) — but it has
+not run on a Snapdragon NPU, because the development environment has no Snapdragon
+device attached. This project has not compiled or profiled any model with AI Hub
+Workbench.
+
+There are three runtime paths, and this file only makes claims about the first:
+
+| Path | Reasoning | Reported as | Validation |
+|---|---|---|---|
+| Snapdragon on-device | Qwen3-VL-4B-Instruct, GenieX + QAIRT (`geniex-qwen3-vl`) | `npu: true` only after a real NPU generation | **Not yet validated on hardware** |
+| Deployed hosted demo (Render) | Groq-hosted `qwen/qwen3.8-27b` (`hosted-groq`) | `hosted: true`, `accelerator: remote`, `npu: false` — never an NPU claim | Live as a hosted service; says nothing about Snapdragon |
+| Optional private vision service (`orion-vision`) | none — detector / classifier / segmenter / tracker / OCR adapters (`remote-vision`) | `npu: false`, CPU on Render | Optional deployment architecture; adapters answer only when model assets are provisioned; not validated on Snapdragon |
+
+In the deployed Render demo the vision service is not configured and no detector,
+classifier, segmenter, OCR, speech-to-text or text-to-speech assets are present, so
+those roles report `unavailable`; image understanding there comes from the hosted
+multimodal model. The classical tracker and the synthetic `lexical_hash_v1` embedding
+are the only other roles running. Deployment details:
+[docs/RENDER.md](docs/RENDER.md).
 
 Rather than shipping code that asserts NPU acceleration, every adapter reports
 the accelerator the runtime actually gave it, and `GET /api/models/status`
@@ -143,7 +160,7 @@ of the real weights) — **never** report `npu: true` for this section:_
 
 | Role | Intended model (§3) | Adapter | Status in this build | Notes |
 |---|---|---|---|---|
-| Reasoning VLM | **Qwen3-VL-4B-Instruct** (GenieX + QAIRT) | `GenieXQwen3VLProvider` (`geniex-qwen3-vl`); alternates `QwenVLGenAIProvider`, `LocalOpenAICompatProvider` | **Implemented — pending validation on the Snapdragon machine** | See "Reasoning on Snapdragon" below. With no model loaded there is no stand-in: reasoning is `unavailable` and Orion says it cannot interpret requests. |
+| Reasoning VLM | **Qwen3-VL-4B-Instruct** (GenieX + QAIRT) | `GenieXQwen3VLProvider` (`geniex-qwen3-vl`); hosted deployment `HostedGroqProvider` (`hosted-groq`); alternates `QwenVLGenAIProvider`, `LocalOpenAICompatProvider` | **Snapdragon path: implemented — pending validation on the Snapdragon machine.** Hosted path: used by the Render demo, reported `hosted`, `npu: false` | See "Reasoning on Snapdragon" below. With no model loaded there is no stand-in: reasoning is `unavailable` and Orion says it cannot interpret requests. |
 | Detection | YOLO11-Detection / YOLO-WORLD | `YoloOnnxDetector`, `YoloWorldDetector` | **Not exported** | Pre/post-processing is complete and real; drop an ONNX export into `data/models/yolov11_det/` and it runs. See the Compute caveat below. |
 | Classification | EfficientNet-B4 | `EfficientNetOnnxClassifier` | **Not exported** | §7's optional stage. Pre/post-processing complete (ImageNet normalisation, softmax, top-k, crop-to-bbox). Absent, the pipeline skips the stage rather than guessing a class. |
 | Segmentation | SAM2 / MobileSAM / YOLO11-Seg | `OnnxSegmenter` | **Not exported** | Session and prototype read-out implemented; mask assembly is finished against the exported head layout. |
@@ -160,12 +177,12 @@ configuration, not by editing code:
 
 | Role | Selectable providers |
 |---|---|
-| reasoning | `geniex-qwen3-vl`, `onnxruntime-genai`, `local-openai-compat` |
-| detector | `yolo-onnx`, `yolo-world-onnx` |
-| classifier | `efficientnet-onnx` |
-| segmenter | `onnx-seg`, `sam2-onnx`, `mobilesam-onnx` |
-| tracker | `edgetam-onnx`, `track-anything-onnx`, `cpu-classical` |
-| ocr | `easyocr`, `trocr-onnx` |
+| reasoning | `geniex-qwen3-vl`, `hosted-groq` (hosted, needs a key), `onnxruntime-genai`, `local-openai-compat` |
+| detector | `yolo-onnx`, `yolo-world-onnx`, `remote-vision` (private vision service) |
+| classifier | `efficientnet-onnx`, `remote-vision` |
+| segmenter | `onnx-seg`, `sam2-onnx`, `mobilesam-onnx`, `remote-vision` |
+| tracker | `edgetam-onnx`, `track-anything-onnx`, `cpu-classical`, `remote-vision` (only when pinned) |
+| ocr | `easyocr`, `trocr-onnx`, `remote-vision` |
 | embedding | `nomic-onnx`, `minilm-onnx`, `lexical-hash` |
 | stt | `whisper-onnx`, `faster-whisper` |
 | tts | `piper` |
