@@ -567,8 +567,11 @@ export function toMessage(body: BackendResponse, mode: Mode): Message {
   const sections: Section[] = []
   for (const s of body.sections ?? []) {
     const kind = sectionKind(s.kind)
-    for (const item of s.items) sections.push({ kind, text: item })
+    for (const item of s.items) sections.push({ kind, text: item, title: s.title || undefined })
   }
+  // The backend splits a structured answer on its headings; whatever the model
+  // wrote before the first heading (its direct answer) is kept as the lead.
+  const lead = sections.length ? leadOf(body.text) : undefined
 
   let memory: string | undefined
   if (body.memory?.stored) memory = 'Saved to this job'
@@ -582,6 +585,7 @@ export function toMessage(body: BackendResponse, mode: Mode): Message {
     kind,
     head: body.question ?? undefined,
     text: sections.length ? undefined : body.text,
+    lead,
     sections: sections.length ? sections : undefined,
     notice: noticeOf(body.notice),
     refs: refsOf(body.refs),
@@ -591,6 +595,22 @@ export function toMessage(body: BackendResponse, mode: Mode): Message {
     memory,
     followUps: body.follow_ups?.length ? body.follow_ups : undefined,
   }
+}
+
+/** Headings the backend recognises (orchestrator._sections_from_text). */
+const SECTION_HEADINGS = new Set(['observed', 'likely causes', 'likely', 'evidence', 'what to test next',
+  'next steps', 'needs confirmation', 'safety'])
+
+function leadOf(text?: string): string | undefined {
+  if (!text) return undefined
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    const key = line.trim().replace(/:$/, '').replace(/^[#*\s]+|[*\s]+$/g, '').toLowerCase()
+    if (SECTION_HEADINGS.has(key)) break
+    out.push(line)
+  }
+  const lead = out.join('\n').trim()
+  return lead || undefined
 }
 
 const STEP_ICONS: Record<string, string> = {

@@ -42,7 +42,7 @@ const VOICE_BUTTON: Record<VoiceState, string> = {
 
 /** The words of an answer, as the Live panel shows and speaks them. */
 function answerText(msg: Message): string {
-  return (msg.text || (msg.sections ?? []).map((s) => s.text).join('\n')).trim()
+  return (msg.text || [msg.lead, ...(msg.sections ?? []).map((s) => s.text)].filter(Boolean).join('\n')).trim()
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {

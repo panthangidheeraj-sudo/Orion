@@ -25,7 +25,8 @@ export interface VFile {
 }
 
 export type SectionKind = 'observed' | 'inferred' | 'next' | 'measure' | 'ref'
-export interface Section { kind: SectionKind; text: string }
+/** `title` is the heading the model itself used ("Likely causes"), when known. */
+export interface Section { kind: SectionKind; text: string; title?: string }
 
 export type NoticeLevel = 'safety' | 'need' | 'confirmed' | 'error'
 export interface NoticeBlock {
@@ -58,6 +59,8 @@ export interface Message {
   mode: Mode
   kind?: MessageKind
   text?: string
+  /** The opening lines of a structured answer, before its first heading. */
+  lead?: string
   head?: string
   attachments?: string[]
   sections?: Section[]

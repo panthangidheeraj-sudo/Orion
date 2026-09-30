@@ -81,7 +81,18 @@ export default function GooeyNav({
   }
 
   const makeParticles = (element: HTMLElement) => {
-    const d = particleDistances
+    // The phone tab's pill is nearly square, so a circular burst around it
+    // reads well. The desktop pill is ~4x wider than tall: a circle either
+    // starts inside the pill (invisible) or far above/below it (clipped by
+    // the bar). So on desktop the same burst is stretched into an ellipse
+    // that hugs the wide pill — bubbles start ~20px outside every edge.
+    let d = particleDistances
+    let kx = 1
+    if (variant === 'top') {
+      const ry = element.offsetHeight / 2 + 12
+      d = [ry, particleDistances[1]]
+      kx = (element.offsetWidth / 2 + 12) / ry
+    }
     const r = particleR
     const bubbleTime = animationTime * 2 + timeVariance
     element.style.setProperty('--time', `${bubbleTime}ms`)
@@ -89,6 +100,14 @@ export default function GooeyNav({
     for (let i = 0; i < particleCount; i++) {
       const t = animationTime * 2 + noise(timeVariance * 2)
       const p = createParticle(i, t, d, r)
+      p.start[0] *= kx
+      p.end[0] *= kx
+      // The swirl rotates each offset; on the stretched desktop ellipse that
+      // would turn sideways bubbles vertical and clip them, so keep it small.
+      if (variant === 'top') {
+        p.rotate *= 0.15
+        p.scale *= 0.55 // desktop: smaller, quieter bubbles than the phone tab bar
+      }
       element.classList.remove('active')
 
       const outer = window.setTimeout(() => {

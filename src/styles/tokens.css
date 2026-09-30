@@ -56,6 +56,13 @@
   --vf-overlay: #ffffff;
   --vf-overlay-2: #b9bec6;
 
+  /* icon volume — the soft cobalt → light-blue depth behind every line icon */
+  --vf-icon-a: #3f74ff;
+  --vf-icon-b: #a9c2ff;
+  --vf-icon-a-alpha: 1;
+  --vf-icon-b-alpha: 0.5;
+  --vf-icon-line: #9db8ff;
+
   /* the one gradient: voice activity */
   --vf-voice: linear-gradient(90deg, #5be1f5, #4096ff, #a88cff, #f07bd0, #ffffff);
 
@@ -105,6 +112,11 @@
    are deepened so they keep AA contrast on white. Every text/surface pair
    below clears 4.5:1 (muted on canvas ≈ 5.3:1). */
 :root[data-theme='light'] {
+  --vf-icon-a: #2f5cff;
+  --vf-icon-b: #8fa6ff;
+  --vf-icon-a-alpha: 0.5;
+  --vf-icon-b-alpha: 0.18;
+  --vf-icon-line: #2f5cff;
   color-scheme: light;
   --vf-black: #f3f4f6;          /* the canvas (named for the dark theme) */
   --vf-panel: #ffffff;

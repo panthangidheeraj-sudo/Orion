@@ -443,7 +443,23 @@ input, textarea { font: inherit; color: inherit; }
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none;
   border-radius: 9px; background: linear-gradient(145deg, var(--vf-track), var(--vf-inset)); border: 1px solid var(--vf-border-strong);
 }
-.sections { display: flex; flex-direction: column; gap: 10px; }
+.sections { display: flex; flex-direction: column; gap: 18px; }
+/* A diagnosis reads as a few headed sections with plain lists — the way a good
+   chat assistant answers — not a row of labelled cards. */
+.answer .prose + .sections { margin-top: 16px; }
+.rsec-h {
+  display: flex; align-items: center; gap: 6px; margin: 0 0 7px; font-size: 14px; font-weight: 650; line-height: 1.3; letter-spacing: 0.005em;
+  color: var(--vf-text);
+}
+.rsec .md { font-size: 14px; line-height: 1.62; color: var(--vf-text-2); }
+.rsec .md > p:first-child { color: inherit; }
+.rsec-list { margin: 0; padding-left: 1.35em; }
+.rsec-list > li { padding-left: 2px; }
+.rsec-list > li + li { margin-top: 7px; }
+.rsec-list > li::marker { color: var(--vf-muted); }
+ol.rsec-list > li::marker { font-family: var(--vf-mono); font-size: 0.86em; }
+.rsec-safety .rsec-h { color: var(--vf-warn); }
+.rsec-list .md > * + * { margin-top: 6px; }
 .section { display: flex; gap: 10px; }
 .section .badge {
   display: flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex: none;
@@ -468,7 +484,13 @@ input, textarea { font: inherit; color: inherit; }
 .notice .title { font-size: 13px; font-weight: 600; line-height: 1.35; }
 .notice .text { font-size: 12.5px; line-height: 1.48; color: var(--vf-text-2); margin-top: 3px; }
 
-.confidence { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--vf-inset); border: 1px solid var(--vf-border); border-radius: 12px; }
+.confidence {
+  display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--vf-border);
+  font-size: 12px; color: var(--vf-muted);
+}
+.confidence .mono { font-size: 11px; color: var(--vf-text-2); }
+.confidence .meter { width: 56px; flex: none; height: 4px; }
+.notice + .confidence { border-top: 0; padding-top: 0; }
 .meter { position: relative; height: 5px; background: var(--vf-track); border-radius: 999px; overflow: hidden; }
 .meter i { position: absolute; inset: 0 auto 0 0; background: var(--vf-text-2); border-radius: 999px; }
 
@@ -787,8 +809,8 @@ input, textarea { font: inherit; color: inherit; }
   .home-body { flex: none; overflow: visible; padding: 0; }
   .home-foot { flex: none; }
   .hero-pressure { margin-bottom: 18px; }
-  .suggestions { margin-top: 14px; gap: 8px; }
-  .suggestion { height: 40px; padding: 0 13px; font-size: 12.5px; }
+  .suggestions { margin-top: 12px; gap: 7px; }
+  .suggestion { height: 34px; padding: 0 11px; gap: 6px; font-size: 12px; }
   .home-foot { justify-content: center; gap: 8px 16px; padding-top: 8px; }
   .strip { justify-content: center; gap: 6px 14px; }
   .strip .status { font-size: 9.5px; letter-spacing: 0.06em; }
@@ -800,6 +822,11 @@ input, textarea { font: inherit; color: inherit; }
   .composer-row { gap: 6px; padding: 0 2px; }
   .composer-left, .composer-right { gap: 6px; }
   .composer .modetoggle button { padding: 0 9px; gap: 5px; font-size: 12.5px; }
+  /* Phone controls: 40px targets (still easy to hit) instead of 44px, so the
+     composer stops dominating a 375px screen. Desktop sizes are unchanged. */
+  .composer .ibtn { width: 40px; height: 40px; border-radius: 12px; }
+  .composer .modetoggle { height: 36px; padding: 3px; border-radius: 11px; }
+  .composer .modetoggle button { height: 30px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
 
   /* ---- chat */
   .chat { gap: 0; margin-top: 0; }

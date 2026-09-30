@@ -23,12 +23,33 @@ const REVEAL_CURSOR = (
   />
 )
 
-const SECTION_META: Record<Section['kind'], { label: string; icon: string; colour: string }> = {
-  observed: { label: 'Observed', icon: 'eye', colour: 'var(--vf-ok)' },
-  inferred: { label: 'Inferred', icon: 'sparks', colour: 'var(--vf-text)' },
-  next: { label: 'Next check', icon: 'check', colour: 'var(--vf-text-2)' },
-  measure: { label: 'Measurements', icon: 'ruler', colour: 'var(--vf-text-2)' },
-  ref: { label: 'Document reference', icon: 'book', colour: 'var(--vf-text-2)' },
+/** One heading per kind of finding. The backend sends each finding as its own
+ * item; they are grouped here so an answer reads as a few sections with lists,
+ * not a log with a label and an icon on every sentence. */
+const SECTION_META: Record<Section['kind'], { label: string; order: number; numbered?: boolean }> = {
+  observed: { label: 'Observed', order: 0 },
+  inferred: { label: 'Interpretation', order: 1 },
+  next: { label: 'Next checks', order: 2, numbered: true },
+  measure: { label: 'Still to confirm', order: 3 },
+  ref: { label: 'From your documents', order: 4 },
+}
+
+interface SectionGroup { key: string; kind: Section['kind']; label: string; safety: boolean; idx: number[] }
+
+/** Group item indexes under one heading each — the model's own heading when it
+ * gave one, otherwise the kind's label — ordered observed → next checks, with a
+ * "Safety" section last. */
+function groupSections(sections: Section[] | undefined): SectionGroup[] {
+  const groups = new Map<string, SectionGroup>()
+  ;(sections ?? []).forEach((s, i) => {
+    const label = s.title?.trim() || SECTION_META[s.kind].label
+    const key = `${s.kind}|${label.toLowerCase()}`
+    const g = groups.get(key)
+    if (g) g.idx.push(i)
+    else groups.set(key, { key, kind: s.kind, label, safety: /^safety$/i.test(label), idx: [i] })
+  })
+  const rank = (g: SectionGroup) => (g.safety ? 9 : SECTION_META[g.kind].order)
+  return [...groups.values()].sort((a, b) => rank(a) - rank(b))
 }
 
 const NOTICE_META = {
@@ -92,7 +113,7 @@ export function AssistantMessage({
   // in), everything else counted as a single unit that appears whole once
   // its turn comes. Order matches the render below exactly.
   const plan = useMemo(() => {
-    const textWords = wordChunks(msg.text)
+    const textWords = wordChunks(msg.text ?? msg.lead)
     const sectionWords = (msg.sections ?? []).map((s) => wordChunks(s.text))
     const hasEvidence = Boolean(msg.evidence?.length)
     const hasConfidence = typeof msg.confidence === 'number'
@@ -147,8 +168,9 @@ export function AssistantMessage({
   const textReveal = takeWords(plan.textWords)
   const sectionReveals = plan.sectionWords.map((chunks) => takeWords(chunks))
   const evidenceShown = plan.hasEvidence ? takeBlock() : false
-  const confidenceShown = plan.hasConfidence ? takeBlock() : false
+  // Safety before the small confidence status line, which closes the answer.
   const noticeShown = !noticeFirst && plan.hasNotice ? takeBlock() : false
+  const confidenceShown = plan.hasConfidence ? takeBlock() : false
   const footerShown = plan.hasFooter ? takeBlock() : false
 
   return (
@@ -184,7 +206,7 @@ export function AssistantMessage({
       {/* Plain prose. The type has always allowed `text`; before this it was
           only ever rendered for the user's own turn, so a conversational reply
           from the assistant came out as an empty card. */}
-      {msg.text && (textReveal.text || done) && (
+      {(msg.text || msg.lead) && (textReveal.text || done) && (
         <Prose text={textReveal.text} chat={isChat} cursor={textReveal.active ? REVEAL_CURSOR : undefined} />
       )}
 
@@ -197,17 +219,25 @@ export function AssistantMessage({
       )}
 
       <div className="sections vf-stagger">
-        {msg.sections?.map((s, i) => {
-          const m = SECTION_META[s.kind]
-          const r = sectionReveals[i]
-          if (!r.text) return null
+        {groupSections(msg.sections).map((g) => {
+          const m = SECTION_META[g.kind]
+          const numbered = m.numbered && !g.safety
+          const shown = g.idx.filter((i) => sectionReveals[i]?.text)
+          if (!shown.length) return null
+          const item = (i: number) => {
+            const r = sectionReveals[i]
+            return <Markdown text={r.text} cursor={r.active ? REVEAL_CURSOR : undefined} />
+          }
+          const List = numbered ? 'ol' : 'ul'
           return (
-            <section className={`section ${s.kind}`} key={i}>
-              <span className="badge"><Icon name={m.icon} size={14} stroke={m.colour} width={1.8} /></span>
-              <div className="body">
-                <Cap style={{ marginBottom: 6 }}>{m.label}</Cap>
-                <Markdown text={r.text} cursor={r.active ? REVEAL_CURSOR : undefined} />
-              </div>
+            <section className={`rsec rsec-${g.kind}${g.safety ? ' rsec-safety' : ''}`} key={g.key}>
+              <h4 className="rsec-h">
+                {g.safety && <Icon name="shield" size={14} stroke="var(--vf-warn)" width={1.8} />}
+                {g.label}
+              </h4>
+              {g.idx.length === 1
+                ? <div className="rsec-one">{item(shown[0])}</div>
+                : <List className="rsec-list">{shown.map((i) => <li key={i}>{item(i)}</li>)}</List>}
             </section>
           )
         })}
@@ -227,19 +257,6 @@ export function AssistantMessage({
           </div>
         )}
 
-        {typeof msg.confidence === 'number' && confidenceShown && (
-          <div className="confidence">
-            <Icon name="gauge" size={18} stroke="var(--vf-text-2)" width={1.8} />
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-                <b style={{ fontSize: 13 }}>{msg.confidenceLabel ?? 'Confidence'}</b>
-                <span className="mono" style={{ fontSize: 11, color: 'var(--vf-muted)' }}>{msg.confidence}% confidence</span>
-              </div>
-              <div className="meter"><i style={{ width: `${msg.confidence}%` }} /></div>
-            </div>
-          </div>
-        )}
-
         {notice && nm && noticeShown && (
           <div className={`notice ${notice.level}`}>
             <Icon name={nm.icon} size={19} stroke={nm.colour} width={1.8} />
@@ -250,6 +267,14 @@ export function AssistantMessage({
             </div>
           </div>
         )}
+        {typeof msg.confidence === 'number' && confidenceShown && (
+          <div className="confidence" aria-label={`${msg.confidenceLabel ?? 'Confidence'}: ${msg.confidence}%`}>
+            <span className="meter" aria-hidden="true"><i style={{ width: `${msg.confidence}%` }} /></span>
+            <span className="mono">{msg.confidence}%</span>
+            <span>{msg.confidenceLabel ?? 'Confidence'}</span>
+          </div>
+        )}
+
       </div>
 
       {((msg.refs && msg.refs.length > 0) || (msg.followUps && msg.followUps.length > 0)) && footerShown && (

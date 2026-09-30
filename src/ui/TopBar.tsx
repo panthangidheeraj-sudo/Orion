@@ -37,7 +37,9 @@ export function TopBar() {
   const nav = useNav(16)
   return (
     <div className="vf-nav">
-      <GooeyNav {...nav} variant="top" ariaLabel="Primary" />
+      {/* A quieter version of the phone tab bar's burst: fewer, smaller bubbles,
+          stretched to hug this wider pill (see GooeyNav makeParticles). */}
+      <GooeyNav {...nav} variant="top" ariaLabel="Primary" particleDistances={[60, 8]} particleCount={6} />
     </div>
   )
 }
