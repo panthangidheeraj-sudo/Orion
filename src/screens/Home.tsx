@@ -8,10 +8,13 @@ import type { Mode } from '../app/types'
 import { Icon } from '../ui/Icon'
 import TextPressure from '../ui/TextPressure'
 
+/* Broad starting points that map to what Orion actually does: look at a photo,
+   read printed text, reason about a fault, and build a checklist. */
 const SUGGESTIONS = [
-  { icon: 'gauge', text: 'Diagnose a vibration', prompt: 'The drive end is vibrating and running hot. Where do I start?' },
-  { icon: 'text', text: 'Read a nameplate', prompt: 'Read the nameplate and tell me the ratings.' },
-  { icon: 'history', text: 'Last inspection', prompt: 'Compare this with the last inspection and tell me if it is getting worse.' },
+  { icon: 'eye', text: 'Inspect equipment', prompt: 'Help me inspect a piece of equipment. What should I look at first, what signs would point to a problem, and what photos should I send you?' },
+  { icon: 'type', text: 'Read a nameplate', prompt: 'Read the nameplate in my photo and list the manufacturer, model, serial number and electrical ratings.' },
+  { icon: 'search', text: 'Find likely causes', prompt: 'Help me find the likely causes of a fault. Ask me what you need to know about the symptoms, then rank the causes and tell me what to check first.' },
+  { icon: 'check', text: 'Build a checklist', prompt: 'Build a step-by-step inspection checklist for this job, starting with isolation and safety checks.' },
 ]
 
 export function Home() {
