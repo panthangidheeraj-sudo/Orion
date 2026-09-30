@@ -76,6 +76,13 @@ export interface BackendInfo {
    * `online` is false in that case, so every caller falls back to the demo
    * responder; this flag only lets the status strip say why. */
   locked?: boolean
+  /** Set by the app (store.tsx), never by the backend: this is the cold-start
+   * window — the host may be waking from sleep or mid-deploy, so "not answering
+   * yet" is shown as Waking/Connecting while the probe is retried. */
+  waking?: boolean
+  /** The backend answered but has not yet reported its (hosted) reasoning model
+   * as ready — set from the real /api/models/status, never assumed. */
+  modelPending?: boolean
   version?: string
   model?: { provider: string; model_id: string; accelerator: string; npu: boolean; synthetic: boolean; hosted?: boolean }
   /** Set from /api/models/status `ai`: which kind of AI this backend is configured for. */
@@ -134,6 +141,8 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
     const status = await apiFetch('/api/models/status', { signal: ctl.signal })
     const body = status.ok ? await status.json() : null
     const reasoning = body?.roles?.reasoning
+    const readyRoles: string[] = body?.summary?.ready ?? []
+    const hostedConfigured = typeof body?.ai?.configured_provider === 'string' && /hosted/i.test(body.ai.configured_provider)
 
     // Health and model status are public; a keyed route tells us whether
     // this browser is actually allowed to use the backend.
@@ -144,6 +153,8 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
       online: !locked,
       locked,
       checked: true,
+      // Up, but the model report is missing or a hosted model is not ready yet.
+      modelPending: !locked && (body === null || (hostedConfigured && !readyRoles.includes('reasoning'))),
       version: '1.0.0',
       ready: body?.summary?.ready ?? [],
       unavailable: body?.summary?.unavailable ?? [],
@@ -165,7 +176,12 @@ export async function probe(timeoutMs = 9000): Promise<BackendInfo> {
         : undefined,
     }
   } catch (err) {
-    cached = { online: false, checked: true, reason: err instanceof Error ? err.message : 'unreachable' }
+    const aborted = err instanceof DOMException && err.name === 'AbortError'
+    cached = {
+      online: false,
+      checked: true,
+      reason: aborted ? `no reply within ${Math.round(timeoutMs / 1000)} s` : err instanceof Error ? err.message : 'unreachable',
+    }
   } finally {
     window.clearTimeout(timer)
   }

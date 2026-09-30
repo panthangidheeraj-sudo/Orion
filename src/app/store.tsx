@@ -176,28 +176,67 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), [])
 
-  const refreshBackend = useCallback(() => {
-    void api.probe().then(setBackend)
+  /* Backend status, including a hosted backend's cold start.
+   *
+   * A Render free-tier service sleeps when idle and takes up to ~a minute to
+   * wake (and is briefly unreachable after a deploy). So for the first
+   * WAKE_MS after load — or after the tab returns to a backend that was
+   * offline — "not answering yet" is shown as Waking, and the probe is retried
+   * every WAKE_EVERY ms. Retrying stops the moment the backend answers (and,
+   * for a hosted model, reports itself ready). Only after the window closes is
+   * it called Offline, with the real reason. Afterwards a slow background check
+   * keeps the status honest without hammering the host. */
+  const WAKE_MS = 90_000
+  const WAKE_EVERY = 4_000
+  const wakeStart = useRef(Date.now())
+  const probing = useRef(false)
+  const retryTimer = useRef<number | null>(null)
+
+  const runProbe = useCallback(() => {
+    if (probing.current) return
+    probing.current = true
+    void api.probe(8000).then((info) => {
+      const inWindow = Date.now() - wakeStart.current < WAKE_MS
+      const waiting = inWindow && !info.locked && (!info.online || Boolean(info.modelPending))
+      setBackend({ ...info, waking: waiting })
+      if (retryTimer.current) window.clearTimeout(retryTimer.current)
+      retryTimer.current = waiting ? window.setTimeout(runProbe, WAKE_EVERY) : null
+    }).finally(() => { probing.current = false })
   }, [])
+
+  /** Re-check now. If the backend is currently not answering, open a fresh
+   * wake window so a tab that comes back after a deploy recovers by itself. */
+  const refreshBackend = useCallback(() => {
+    const cur = backendRef.current
+    if ((!cur.online || cur.modelPending) && !cur.locked && !cur.waking) wakeStart.current = Date.now()
+    runProbe()
+  }, [runProbe])
 
   // The backend is optional. If it is not running the app still works, on the
   // local demo responder, and says so rather than pretending.
   useEffect(() => {
-    refreshBackend()
+    wakeStart.current = Date.now()
+    runProbe()
     const onFocus = () => refreshBackend()
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [refreshBackend])
+    window.addEventListener('online', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('online', onFocus)
+      if (retryTimer.current) window.clearTimeout(retryTimer.current)
+    }
+  }, [runProbe, refreshBackend])
 
-  // Keep the status honest over time: a hosted backend can go to sleep or wake
-  // up while the page stays open. Re-check more often while it is offline.
+  // The slow background check once the fast wake retries are over (or while
+  // online): a hosted backend can go to sleep or wake while the page stays open.
   useEffect(() => {
-    const every = backend.online ? 60_000 : 20_000
+    const every = backend.online ? 60_000 : 30_000
     const h = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refreshBackend()
+      if (document.visibilityState !== 'visible' || backendRef.current.waking) return
+      runProbe()
     }, every)
     return () => window.clearInterval(h)
-  }, [backend.online, refreshBackend])
+  }, [backend.online, runProbe])
 
   const go = useCallback<Store['go']>((r, opts) => {
     if (opts?.conversation) setActiveId(opts.conversation)

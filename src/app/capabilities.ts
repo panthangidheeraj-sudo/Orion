@@ -22,15 +22,24 @@ export interface Capability {
  * therefore honestly read "Local AI unavailable".
  */
 export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Capability[] {
-  const checking = backend.checked === false
+  const connecting = backend.checked === false
+  const waking = Boolean(backend.waking) && !backend.locked
+  // Not answering yet, inside the cold-start window (a hosted backend waking
+  // from sleep or restarting after a deploy) — not yet a real "offline".
+  const checking = connecting || waking
 
-  const backendCap: Capability = checking
-    ? { key: 'backend', label: 'Backend', state: 'busy', word: 'Checking', detail: 'Contacting the backend…' }
+  const backendCap: Capability = connecting
+    ? { key: 'backend', label: 'Backend', state: 'busy', word: 'Connecting', detail: 'Contacting the backend…' }
+    : waking && !backend.online
+      ? { key: 'backend', label: 'Backend', state: 'busy', word: 'Waking', detail: 'The hosted backend is waking up (it sleeps when idle, or is restarting after an update). Retrying every few seconds — this can take up to a minute.' }
     : backend.locked
       ? { key: 'backend', label: 'Backend', state: 'error', word: 'Locked', detail: 'The backend is running but needs its access key — enter it below.' }
       : backend.online
       ? { key: 'backend', label: 'Backend', state: 'ready', word: 'Online', detail: 'The Orion backend answered its health check.' }
-      : { key: 'backend', label: 'Backend', state: 'error', word: 'Offline', detail: 'The backend did not answer — the built-in demo responder is being used.' }
+      : {
+          key: 'backend', label: 'Backend', state: 'error', word: 'Offline',
+          detail: `The backend did not answer${backend.reason ? ` (${backend.reason})` : ''}, even after about a minute and a half of retries — the built-in demo responder is being used. Orion keeps checking every 30 seconds and will reconnect on its own.`,
+        }
 
   const model = backend.model
   const aiReady = backend.online
@@ -43,7 +52,11 @@ export function systemCapabilities(backend: BackendInfo, webSearch: boolean): Ca
   const hosted = aiReady ? Boolean(model?.hosted) : /hosted/i.test(backend.aiConfigured ?? '')
   const aiLabel = hosted ? 'Hosted AI' : 'Local AI'
   const aiCap: Capability = checking
-    ? { key: 'ai', label: 'Local AI', state: 'busy', word: 'Checking', detail: 'Waiting for the backend’s model report…' }
+    ? {
+        key: 'ai', label: /hosted/i.test(backend.aiConfigured ?? '') ? 'Hosted AI' : 'Local AI', state: 'busy',
+        word: backend.online ? 'Connecting' : 'Waiting',
+        detail: backend.online ? 'The backend is up — waiting for its model report…' : 'Waiting for the backend to wake…',
+      }
     : aiReady
       ? {
           key: 'ai', label: aiLabel, state: 'ready', word: 'Ready',
